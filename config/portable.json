@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "upstream_url": "https://github.com/q3236088892/xianyu-auto-reply.git",
+  "branch": "main",
+  "service_host": "127.0.0.1",
+  "service_ports": {
+    "backend-web": 8089,
+    "websocket": 8090,
+    "scheduler": 8091,
+    "frontend": 9000
+  },
+  "candidate_service_ports": {
+    "backend-web": 18089,
+    "websocket": 18090,
+    "scheduler": 18091,
+    "frontend": 19000
+  },
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "root",
+    "database": "xianyu_auto_reply"
+  },
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "password": "",
+    "db": 0
+  },
+  "schedule_time": "03:30",
+  "auto_apply": true,
+  "release_retention": 2,
+  "maintenance_log_retention_days": 7,
+  "health_timeout_seconds": 60,
+  "task_name": "XianyuAutoReply-Zhinianboke-Portable-Update"
+}

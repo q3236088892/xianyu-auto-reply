@@ -267,3 +267,17 @@ slider_test/
 # ------------------------------------------
 AGENTS.md
 .codex/
+
+# ------------------------------------------
+# 便携版运行时产物与本地状态（体量大 / 含敏感数据，绝不纳入版本管理）
+#   state/     —— 运行状态、账号登录二维码(active-qr-*.png)、mysql/redis 数据等
+#   runtime/   —— 内置 python/node/git/mysql/redis 等运行时（数百 MB）
+#   releases/  —— 每次更新构建出的版本目录
+#   cache/     —— pip / 下载缓存
+#   staging/   —— 更新过程中的临时源码/构建目录
+# ------------------------------------------
+/state/
+/runtime/
+/releases/
+/cache/
+/staging/

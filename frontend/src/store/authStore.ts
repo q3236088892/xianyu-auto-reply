@@ -17,7 +17,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
       refreshToken: null,
       user: null,
@@ -25,13 +25,20 @@ export const useAuthStore = create<AuthState>()(
       _hasHydrated: false,
 
       setAuth: (token, refreshToken, user) => {
+        // 防御性处理：setAuth 在每次刷新页面验证 token 后都会被调用，
+        // 若此时传入的 refreshToken 为空，绝不能覆盖已有的有效值，
+        // 否则 access token 过期后拦截器拿不到 refresh_token 无法静默刷新，用户会被强制登出。
+        const effectiveRefreshToken =
+          refreshToken || localStorage.getItem('refresh_token') || get().refreshToken || ''
         localStorage.setItem('auth_token', token)
-        localStorage.setItem('refresh_token', refreshToken)
+        if (effectiveRefreshToken) {
+          localStorage.setItem('refresh_token', effectiveRefreshToken)
+        }
         localStorage.setItem('user_info', JSON.stringify(user))
         // 注意：此处不清除弹窗公告会话标记。
         // setAuth 在每次刷新页面验证 token 后也会被调用，若在此清除标记，
         // 会导致刷新后公告重复弹出。清除标记的逻辑放在真正的登录成功处（Login.tsx）。
-        set({ token, refreshToken, user, isAuthenticated: true })
+        set({ token, refreshToken: effectiveRefreshToken, user, isAuthenticated: true })
       },
 
       clearAuth: () => {

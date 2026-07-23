@@ -1,0 +1,7 @@
+@echo off
+setlocal
+set "ROOT=%~dp0"
+"%ROOT%runtime\python\python.exe" "%ROOT%scripts\portable_manager.py" update %*
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%
+

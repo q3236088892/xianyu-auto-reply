@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "paths": [
+    "backend-web/static/uploads",
+    "backend-web/browser_data",
+    "backend-web/logs",
+    "websocket/browser_data",
+    "websocket/logs",
+    "scheduler/browser_data",
+    "scheduler/logs",
+    "browser_data",
+    "backups"
+  ],
+  "database_globs": [
+    "*.db",
+    "*.sqlite",
+    "*.sqlite3",
+    "*.db-wal",
+    "*.db-shm",
+    "*.db-journal"
+  ]
+}

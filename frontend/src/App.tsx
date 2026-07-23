@@ -152,7 +152,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       try {
         const result = await verifyToken()
         if (result.authenticated && result.user_id) {
-          const refreshToken = localStorage.getItem('refresh_token') || ''
+          // 优先用 localStorage 里的 refresh_token；若缺失则退回到 store 中已有的值，
+          // 避免每次页面加载 verify 后把一个空字符串写回去，导致后续 access token
+          // 过期时拦截器拿不到 refresh_token、无法静默刷新而被强制登出。
+          const refreshToken =
+            localStorage.getItem('refresh_token') ||
+            useAuthStore.getState().refreshToken ||
+            ''
           setAuth(token, refreshToken, {
             user_id: result.user_id,
             username: result.username || '',

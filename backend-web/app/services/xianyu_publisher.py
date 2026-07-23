@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -333,14 +334,26 @@ class XianyuPublisher:
             await self._upload_images(images)
 
             logger.info("\n[步骤3] ⏳ 等待图片上传和分类自动识别...")
-            await asyncio.sleep(5)
-
-            try:
-                category_elements = await self.page.query_selector_all('[class*="category"], [class*="分类"]')
-                if category_elements:
-                    logger.info(f"✅ 检测到 {len(category_elements)} 个分类相关元素")
-            except Exception:
-                pass
+            # 关键修复：图片较多（如 7 张）时上传耗时长、页面 DOM 渲染更晚，
+            # 原来固定 sleep(5) 后就往下走，分类选择区往往还没出现，
+            # 导致 _select_category 的短超时全部落空、分类没选上，最终点发布不跳转。
+            # 这里改为轮询等待分类相关元素真正出现（最多 20 秒），确保页面就绪后再继续。
+            category_ready = False
+            deadline = asyncio.get_event_loop().time() + 20
+            while asyncio.get_event_loop().time() < deadline:
+                try:
+                    category_elements = await self.page.query_selector_all('[class*="category"], [class*="分类"]')
+                    if category_elements:
+                        logger.info(f"✅ 检测到 {len(category_elements)} 个分类相关元素")
+                        category_ready = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+            if not category_ready:
+                logger.warning("⚠️ 20 秒内未检测到分类相关元素，页面可能仍在渲染，继续尝试后续步骤")
+            # 额外给页面一点稳定时间，让分类/表单渲染完成。
+            await asyncio.sleep(2)
 
             logger.info("\n[步骤4] 📝 填写宝贝描述...")
             await self._fill_description(item_data)
@@ -474,7 +487,43 @@ class XianyuPublisher:
                 if add_image_button is None and not file_input:
                     raise Exception("未找到'添加首图'按钮或文件输入框")
 
-        uploaded_count = 0
+        # 精确统计"已上传预览图"数量的选择器组。
+        # 说明：原实现用 img[class*="img"] / [class*="image"] img 这类过于宽泛的选择器，
+        # 会把页面上的图标、占位图、示例图也算进去；再配合"绝对数量 >= i"的判定，
+        # 会在图片还没真正上传完时就误判为"已完成"，导致后续提前点发布、
+        # 页面未跳转而发布失败（图越多越容易触发）。这里改为按"上传前后的增量"判断。
+        preview_selectors = [
+            '.imgList img',
+            '[class*="uploaded"] img',
+            '[class*="image-item"] img',
+            'img[src*="upload"]',
+            'img[src*="temp"]',
+            'img[class*="img"]',
+        ]
+
+        async def count_previews() -> int:
+            """统计当前页面已上传的预览图数量（取各选择器命中的最大值）。"""
+            best = 0
+            for selector in preview_selectors:
+                try:
+                    imgs = await self.page.query_selector_all(selector)
+                    if len(imgs) > best:
+                        best = len(imgs)
+                except Exception:
+                    continue
+            return best
+
+        # 以"页面预览图的绝对数量"作为唯一事实来源。
+        # 历史踩坑：
+        #   1) 早期用 img[class*="img"] 等宽泛选择器 + "绝对数量 >= i" 判定，
+        #      会把占位/示例图算进去而提前误判为已完成；
+        #   2) 后来改成逐张累加 uploaded_count，两张图并发渲染时会漏计（7 张只数到 6）；
+        #   3) 再改成"初始基准 base_count + 已提交数"作目标，又踩到另一个坑——
+        #      页面上传前就有 1 张占位 img，它会被第一张真实图“替换”而非“新增”，
+        #      于是目标整体偏移 +1，7 张全传完仍差 1，报“6/7”。
+        # 结论：占位图会被替换，基准不可靠。真正稳定的事实是——
+        #   每张图上传后，页面预览图的绝对数量应达到当前序号 i；
+        #   全部完成后，绝对数量应等于图片总数。故这里直接用绝对数量，不做任何基准减法。
         for i, image_path in enumerate(images, 1):
             try:
                 file_path = await self._resolve_upload_image_path(str(image_path))
@@ -509,35 +558,21 @@ class XianyuPublisher:
                 await file_input.set_input_files(file_path)
                 logger.info(f"✅ 已选择图片 {i}")
 
-                await asyncio.sleep(5)
-
-                success_indicators = [
-                    'img[src*="upload"]',
-                    '.imgList img',
-                    '[class*="uploaded"] img',
-                    '[class*="image-item"] img',
-                    'img[src*="temp"]',
-                    'img[class*="img"]',
-                    '[class*="image"] img',
-                    '[class*="photo"] img',
-                    '[class*="thumb"] img',
-                ]
-
-                uploaded = False
-                for indicator in success_indicators:
-                    try:
-                        uploaded_images = await self.page.query_selector_all(indicator)
-                        if len(uploaded_images) >= i:
-                            logger.info(f"✅ 图片 {i} 上传成功 (找到 {len(uploaded_images)} 张图片, 使用选择器: {indicator})")
-                            uploaded = True
-                            uploaded_count += 1
-                            break
-                    except Exception:
-                        continue
-
-                if not uploaded:
-                    logger.warning(f"⚠️ 图片 {i} 上传状态不明确，继续")
-                    uploaded_count += 1
+                # 轮询等待页面预览图的绝对数量达到当前序号 i，最多等 30 秒。
+                # 用绝对目标 i（而非基准偏移或增量累加），避开占位图被替换、
+                # 并发渲染漏计等所有历史坑。
+                target = i
+                deadline = asyncio.get_event_loop().time() + 30
+                now_count = await count_previews()
+                while now_count < target and asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(1)
+                    now_count = await count_previews()
+                if now_count >= target:
+                    logger.info(f"✅ 图片 {i} 上传成功（预览图达到 {now_count} 张，目标 {target}）")
+                else:
+                    logger.warning(
+                        f"⚠️ 图片 {i} 在 30 秒内未确认上传成功（预览图 {now_count} 张，目标 {target}）"
+                    )
 
                 if i < len(images):
                     await asyncio.sleep(2)
@@ -574,10 +609,23 @@ class XianyuPublisher:
                 logger.warning(f"⚠️ 图片 {i} 上传失败: {e}")
                 continue
 
-        if uploaded_count == 0:
+        # 总数校验：以"页面预览图的绝对数量"为唯一事实来源，不做任何基准减法。
+        # 全部图片上传完成后，页面预览图的绝对数量应达到图片总数；
+        # 否则说明确有图片没传上去，直接中止发布，绝不带着缺图点发布按钮。
+        total = len(images)
+        final_count = await count_previews()
+        if final_count <= 0:
             raise Exception("❌ 没有成功上传任何图片")
+        if final_count < total:
+            raise Exception(
+                f"❌ 图片未全部上传成功（仅 {final_count}/{total} 张），已中止发布，请重试"
+            )
 
-        logger.info(f"✅ 共上传 {uploaded_count}/{len(images)} 张图片")
+        # 记录本次期望的图片数量，供 _click_publish_button 点击发布前做最终断言，
+        # 作为"绝不带着缺图点发布"的最后一道防线。
+        self._expected_image_count = total
+
+        logger.info(f"✅ 共上传 {final_count}/{total} 张图片")
 
     async def _set_item_address(self, item_data: dict):
         address = (item_data.get("address") or "").strip()
@@ -1690,6 +1738,35 @@ class XianyuPublisher:
 
             await asyncio.sleep(2)
 
+            # 点击发布前的最终防线：确认页面上的预览图数量达到期望值。
+            # _upload_images 已把期望张数记到 self._expected_image_count；
+            # 万一上游流程有变化、图片在点击前被移除或未渲染完成，这里直接拦下，
+            # 避免"图不全就点发布"导致页面不跳转的失败。
+            expected_image_count = getattr(self, "_expected_image_count", 0)
+            if expected_image_count:
+                preview_selectors = [
+                    '.imgList img',
+                    '[class*="uploaded"] img',
+                    '[class*="image-item"] img',
+                    'img[src*="upload"]',
+                    'img[src*="temp"]',
+                    'img[class*="img"]',
+                ]
+                current_previews = 0
+                for selector in preview_selectors:
+                    try:
+                        imgs = await self.page.query_selector_all(selector)
+                        if len(imgs) > current_previews:
+                            current_previews = len(imgs)
+                    except Exception:
+                        continue
+                if current_previews < expected_image_count:
+                    raise Exception(
+                        f"❌ 发布前校验失败：页面预览图仅 {current_previews}/{expected_image_count} 张，"
+                        "图片未就绪，已中止发布，请重试"
+                    )
+                logger.info(f"✅ 发布前校验通过：预览图 {current_previews}/{expected_image_count} 张")
+
             logger.info("🚀 点击发布按钮...")
             publish_target = self.page.locator(publish_btn_selector).first if publish_btn_selector else None
             if publish_target is None:
@@ -1758,6 +1835,10 @@ class XianyuPublisher:
                 logger.warning("⚠️ 页面未跳转，仍停留在发布页")
                 logger.warning(f"⚠️ 当前URL: {current_url}")
                 logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
+                # 诊断增强：未跳转时把页面完整文本打印出来、截图存盘，
+                # 便于判断到底是"请选择分类"字段校验、风控验证还是审核拦截，
+                # 避免靠猜测反复试错。
+                await self._dump_publish_failure_context(page_text)
 
             else:
                 result["success"] = False
@@ -1767,10 +1848,47 @@ class XianyuPublisher:
                 logger.warning(f"⚠️ 当前URL: {current_url}")
                 logger.warning(f"⚠️ 页面文本: {page_text[:200]}")
                 logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
+                await self._dump_publish_failure_context(page_text)
 
         else:
             result["message"] = '未找到发布按钮'
             logger.error("❌ 未找到发布按钮")
+
+    async def _dump_publish_failure_context(self, page_text: str) -> None:
+        """发布未跳转时，转储页面文本与整页截图，供事后定位真实拦截原因。
+
+        - 把页面完整可见文本打到日志（截断到 2000 字，避免刷屏）；
+        - 命中一批常见关键词时明确点名（请选择分类 / 验证 / 审核 / 风控等）；
+        - 把整页截图存到 logs/app/publish_failures/ 下，文件名带时间戳。
+        这样"页面未跳转"不再只是猜测，而有据可查。
+        """
+        try:
+            logger.warning("—— 发布失败页面文本（截断 2000 字）——")
+            logger.warning((page_text or "")[:2000])
+            logger.warning("—— 页面文本结束 ——")
+
+            # 命中常见拦截关键词时直接点名，便于一眼定位。
+            hints = [
+                "请选择分类", "请选择", "请填写", "必填", "不能为空",
+                "验证", "滑动", "拖动", "安全", "校验",
+                "审核", "风控", "违规", "限制", "频繁", "异常",
+            ]
+            hit = [kw for kw in hints if kw and kw in (page_text or "")]
+            if hit:
+                logger.warning(f"⚠️ 页面命中疑似拦截关键词: {hit}")
+
+            # 整页截图存盘。
+            from pathlib import Path
+            from datetime import datetime
+
+            dump_dir = Path("logs") / "app" / "publish_failures"
+            dump_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            shot_path = dump_dir / f"publish-fail-{stamp}.png"
+            await self.page.screenshot(path=str(shot_path), full_page=True)
+            logger.warning(f"⚠️ 发布失败整页截图已保存: {shot_path.resolve()}")
+        except Exception as exc:
+            logger.warning(f"转储发布失败上下文时出错（忽略）: {exc}")
 
     async def close_only_browser(self):
         """只关闭浏览器，不停止playwright"""
