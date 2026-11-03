@@ -10,6 +10,7 @@ from typing import Dict
 
 from fastapi import APIRouter, Depends
 from loguru import logger
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -20,17 +21,29 @@ from app.api.deps import get_db_session as get_db
 from common.models.user import User
 from common.schemas.common import ApiResponse
 from common.services.account_limit_service import AccountLimitExceededError
+from common.services.proxy_factory import httpx_proxy_url
 
 router = APIRouter(prefix="/qr-login", tags=["二维码登录"])
 
-# 会话所有者映射
-SESSION_OWNER: Dict[str, int] = {}
+# 会话元数据：owner_id + 可选的占位记录ID（扫码前创建、扫码成功后转正/过期删除）
+SESSION_META: Dict[str, Dict] = {}
 
 # 已处理的会话记录，防止重复处理
 PROCESSED_SESSIONS: Dict[str, Dict] = {}
 
 # 会话处理锁，防止并发处理同一个会话
 SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+class GenerateQRRequest(BaseModel):
+    """生成二维码请求。带代理字段时会先创建一条占位账号记录：
+    代理配置写入该记录，且二维码生成/轮询全程走该代理出口。
+    扫码成功后占位记录转正（account_id 替换为真实ID，代理保留）。"""
+    proxy_type: str | None = None
+    proxy_host: str | None = None
+    proxy_port: int | None = None
+    proxy_user: str | None = None
+    proxy_pass: str | None = None
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
@@ -42,7 +55,7 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
 
 def _cleanup_session(session_id: str):
     """清理会话相关数据"""
-    SESSION_OWNER.pop(session_id, None)
+    SESSION_META.pop(session_id, None)
     SESSION_LOCKS.pop(session_id, None)
 
 
@@ -67,37 +80,86 @@ def _build_processed_response(processed_info: dict) -> ApiResponse:
 
 @router.post("/generate")
 async def generate_qr_code(
+    payload: GenerateQRRequest | None = None,
     current_user: User = Depends(deps.get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     """
     生成二维码
-    
-    返回二维码图片的Base64编码和会话ID
+
+    传入代理字段时：先创建占位账号记录（随机ID、代理已写入），
+    且二维码生成请求全程经该代理出口，扫码成功后占位记录转正。
+    返回二维码图片的Base64编码和会话ID。
     """
+    pending_account_id: str | None = None
+    account_service = AccountService(db)
     try:
-        result = await qr_login_manager.generate_qr_code()
+        proxy_url: str | None = None
+        has_proxy = bool(
+            payload
+            and payload.proxy_type
+            and payload.proxy_type != "none"
+            and payload.proxy_host
+            and payload.proxy_port
+        )
+        if has_proxy:
+            # 1. 建占位记录：代理配置先于 Cookie 签发落库
+            pending = await account_service.create_pending_account(
+                current_user.id,
+                proxy_type=payload.proxy_type,
+                proxy_host=payload.proxy_host,
+                proxy_port=int(payload.proxy_port),
+                proxy_user=payload.proxy_user or None,
+                proxy_pass=payload.proxy_pass or None,
+            )
+            pending_account_id = pending.account_id
+            # 2. 翻译成 httpx 代理 URL（SOCKS5 强制 socks5h，代理侧解析DNS）
+            proxy_url = httpx_proxy_url(
+                payload.proxy_type,
+                payload.proxy_host,
+                int(payload.proxy_port),
+                payload.proxy_user,
+                payload.proxy_pass,
+            )
+
+        result = await qr_login_manager.generate_qr_code(proxy=proxy_url)
         session_id = result.get("session_id")
-        
+
         if result.get("success") and session_id:
-            SESSION_OWNER[session_id] = current_user.id
-            logger.info(f"二维码生成成功: session_id={session_id}, user_id={current_user.id}")
+            SESSION_META[session_id] = {
+                "owner_id": current_user.id,
+                "pending_account_id": pending_account_id,
+            }
+            logger.info(
+                f"二维码生成成功: session_id={session_id}, user_id={current_user.id}, "
+                f"pending_account_id={pending_account_id}"
+            )
             return ApiResponse(
                 success=True,
                 message="二维码生成成功",
                 data={
                     "session_id": session_id,
                     "qr_code_url": result.get("qr_code_url"),
+                    "pending_account_id": pending_account_id,
                 }
             )
         else:
             error_msg = result.get("message", "生成二维码失败")
             logger.error(f"二维码生成失败: {error_msg}")
+            # 二维码生成失败：回滚删除占位记录，不留空壳
+            if pending_account_id:
+                await account_service.delete_pending_account(current_user.id, pending_account_id)
             return ApiResponse(
                 success=False,
                 message=error_msg,
             )
     except Exception as e:
         logger.exception("生成二维码时发生异常")
+        if pending_account_id:
+            try:
+                await account_service.delete_pending_account(current_user.id, pending_account_id)
+            except Exception:
+                logger.exception(f"回滚删除占位记录失败: {pending_account_id}")
         return ApiResponse(
             success=False,
             message=f"生成二维码失败: {str(e)}",
@@ -134,8 +196,10 @@ async def get_qr_status(
         
         # 如果扫码成功，自动创建或更新账号
         if status == "success":
-            owner_id = SESSION_OWNER.get(session_id, current_user.id)
-            
+            meta = SESSION_META.get(session_id, {})
+            owner_id = meta.get("owner_id", current_user.id)
+            pending_account_id = meta.get("pending_account_id")
+
             # 使用锁防止并发处理
             lock = _get_session_lock(session_id)
             async with lock:
@@ -143,18 +207,19 @@ async def get_qr_status(
                 if session_id in PROCESSED_SESSIONS:
                     processed_info = PROCESSED_SESSIONS[session_id]
                     return _build_processed_response(processed_info)
-                
+
                 cookies_info = qr_login_manager.get_session_cookies(session_id)
                 if cookies_info:
                     cookies_str = cookies_info.get("cookies", "")
                     unb = cookies_info.get("unb")
-                    
+
                     try:
                         account_service = AccountService(db)
                         account, is_new_account = await account_service.upsert_account_from_qr(
                             owner_id=owner_id,
                             cookies=cookies_str,
                             unb=unb,
+                            target_account_id=pending_account_id,
                         )
                     except AccountLimitExceededError as exc:
                         message = str(exc)
@@ -237,8 +302,18 @@ async def get_qr_status(
                         }
                     )
         
-        # 清理过期或取消的会话
+        # 清理过期或取消的会话；占位记录（未转正的）一并删除，不留空壳
         if status in {"expired", "cancelled", "not_found"}:
+            meta = SESSION_META.get(session_id, {})
+            pending_account_id = meta.get("pending_account_id")
+            if pending_account_id:
+                try:
+                    await AccountService(db).delete_pending_account(
+                        meta.get("owner_id", current_user.id), pending_account_id
+                    )
+                    logger.info(f"会话{status}，已清理占位记录: {pending_account_id}")
+                except Exception:
+                    logger.exception(f"清理占位记录失败: {pending_account_id}")
             _cleanup_session(session_id)
             PROCESSED_SESSIONS.pop(session_id, None)
         

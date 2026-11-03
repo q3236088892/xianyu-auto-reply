@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
@@ -25,6 +26,9 @@ UTC = timezone.utc
 
 class AccountService:
     """Provides access to legacy cookie account records."""
+
+    # 扫码占位记录的 login_method 标记：转正前可被安全删除，转正后变为 qr_scan
+    PENDING_LOGIN_METHOD = "qr_pending"
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -458,6 +462,71 @@ class AccountService:
             counter += 1
         return candidate
 
+    async def create_pending_account(
+        self,
+        owner_id: int,
+        *,
+        proxy_type: str = "none",
+        proxy_host: str | None = None,
+        proxy_port: int | None = None,
+        proxy_user: str | None = None,
+        proxy_pass: str | None = None,
+    ) -> XYAccount:
+        """扫码登录前创建占位记录：随机不重复 account_id、无 Cookie、inactive。
+
+        占位记录让代理配置在"扫码成功签发 Cookie 之前"就落到一条账号记录上，
+        并由二维码生成请求携带该代理（见 qr_login 路由），使整个登录链
+        （取二维码 -> 轮询 -> 签发 Cookie）全程走目标出口 IP。
+        扫码成功后由 upsert_account_from_qr(target_account_id=...) 转正。
+        """
+        new_id = await self._generate_unique_account_id(owner_id, f"pending_{uuid.uuid4().hex[:8]}")
+        account = XYAccount(
+            owner_id=owner_id,
+            account_id=new_id,
+            cookie="",
+            login_method=self.PENDING_LOGIN_METHOD,
+            status="inactive",
+            auto_confirm=False,
+            pause_duration=10,
+            show_browser=False,
+            proxy_type=proxy_type,
+            proxy_host=proxy_host,
+            proxy_port=proxy_port,
+            proxy_user=proxy_user,
+            proxy_pass=proxy_pass,
+            created_at=datetime.now(tz=UTC),
+            updated_at=datetime.now(tz=UTC),
+        )
+        self.session.add(account)
+        await self.session.commit()
+        await self.session.refresh(account)
+        return account
+
+    async def delete_pending_account(self, owner_id: int, account_id: str) -> bool:
+        """仅删除仍未转正的占位记录（login_method=qr_pending），防止误删真号。"""
+        stmt = select(XYAccount).where(
+            XYAccount.owner_id == owner_id,
+            XYAccount.account_id == account_id,
+            XYAccount.login_method == self.PENDING_LOGIN_METHOD,
+        )
+        result = await self.session.execute(stmt)
+        account = result.scalars().first()
+        if not account:
+            return False
+        await self.session.delete(account)
+        await self.session.commit()
+        return True
+
+    async def get_pending_account(self, owner_id: int, account_id: str) -> XYAccount | None:
+        """按 account_id 取该用户的占位记录（未转正才返回）。"""
+        stmt = select(XYAccount).where(
+            XYAccount.owner_id == owner_id,
+            XYAccount.account_id == account_id,
+            XYAccount.login_method == self.PENDING_LOGIN_METHOD,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def upsert_account_from_qr(
         self,
         owner_id: int,
@@ -465,8 +534,22 @@ class AccountService:
         unb: str | None,
         *,
         login_method: str = "qr_scan",
+        target_account_id: str | None = None,
     ) -> tuple[XYAccount, bool]:
+        """扫码成功后保存账号。
+
+        定位优先级：
+        1. unb 命中已有真号记录 -> 更新它（重复扫码同号）；若同时带了占位记录，
+           占位记录已无用，随事务删除，避免留下空壳。
+        2. 指定了 target_account_id（扫码前创建的占位记录）-> 把该记录转正：
+           account_id 替换为真实 unb，写入 Cookie，代理字段原样保留。
+        3. 都没有 -> 新建记录（account_id 由 unb 生成）。
+        """
         account: XYAccount | None = None
+        pending: XYAccount | None = None
+        if target_account_id:
+            pending = await self.get_pending_account(owner_id, target_account_id)
+
         if unb:
             account = await self.get_account_by_unb(owner_id, unb)
 
@@ -481,6 +564,24 @@ class AccountService:
             account.last_login_at = datetime.now(tz=UTC)
             if hasattr(account, "updated_at"):
                 account.updated_at = datetime.now(tz=UTC)
+            # unb 命中的是已有真号：占位记录（若存在且非同一条）已无用处，直接删除
+            if pending is not None and pending.id != account.id:
+                await self.session.delete(pending)
+        elif pending is not None:
+            # 占位记录转正：真实 account_id 写入，代理字段保留
+            await AccountLimitService(self.session).ensure_can_add_account(owner_id)
+            base = unb or f"qr_{int(datetime.now(tz=UTC).timestamp())}"
+            pending.account_id = await self._generate_unique_account_id(owner_id, base)
+            pending.cookie = cookies
+            pending.metadata_json = clear_cookie_refresh_snapshot(pending.metadata_json)
+            pending.status = "active"
+            pending.disable_reason = None
+            pending.login_method = login_method
+            pending.unb = unb
+            pending.last_login_at = datetime.now(tz=UTC)
+            if hasattr(pending, "updated_at"):
+                pending.updated_at = datetime.now(tz=UTC)
+            account = pending
         else:
             await AccountLimitService(self.session).ensure_can_add_account(owner_id)
             base_id = unb or f"qr_{int(datetime.utcnow().timestamp())}"

@@ -210,11 +210,18 @@ class QRLoginManager:
                 logger.error("获取登录参数时连接错误")
                 raise
 
-    async def generate_qr_code(self) -> Dict[str, Any]:
-        """生成二维码"""
+    async def generate_qr_code(self, proxy: Optional[str] = None) -> Dict[str, Any]:
+        """生成二维码
+
+        Args:
+            proxy: 可选 httpx 代理 URL（如 socks5h://user:pass@host:port）。
+                   传入后整个登录链（取参数/生成二维码/轮询）都经该代理出口，
+                   使登录 Cookie 从第一跳起就是目标出口 IP 签发。
+        """
         try:
             session_id = str(uuid.uuid4())
             session = QRLoginSession(session_id)
+            session.proxy = proxy
 
             await self._get_mh5tk(session)
             logger.info(f"获取m_h5_tk成功: {session_id}")

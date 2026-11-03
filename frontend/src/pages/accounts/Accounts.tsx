@@ -129,12 +129,21 @@ export function Accounts() {
 
   // 扫码登录状态
   const [qrCodeUrl, setQrCodeUrl] = useState('')
-  const [, setQrSessionId] = useState('')
-  const [qrStatus, setQrStatus] = useState<'loading' | 'ready' | 'scanned' | 'verification_required' | 'success' | 'failed' | 'expired' | 'error'>('loading')
+  const [qrSessionId, setQrSessionId] = useState('')
+  const [qrStatus, setQrStatus] = useState<'idle' | 'loading' | 'ready' | 'scanned' | 'verification_required' | 'success' | 'failed' | 'expired' | 'error'>('idle')
   const [qrErrorMessage, setQrErrorMessage] = useState('')
   // 扫码登录触发人脸验证时的人脸二维码(base64)
   const [qrFaceQrUrl, setQrFaceQrUrl] = useState('')
   const qrCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 扫码登录的代理配置（可选）：勾选后整个登录链走该代理出口，
+  // 后端会自动创建占位账号记录，扫码成功后转正为真实账号
+  const [qrUseProxy, setQrUseProxy] = useState(true)
+  const [qrProxyType, setQrProxyType] = useState<'none' | 'http' | 'https' | 'socks5'>('socks5')
+  const [qrProxyHost, setQrProxyHost] = useState('127.0.0.1')
+  const [qrProxyPort, setQrProxyPort] = useState<number | ''>(11080)
+  const [qrProxyUser, setQrProxyUser] = useState('adspower')
+  const [qrProxyPass, setQrProxyPass] = useState('d88b092d4cda1e94')
+  const [qrPendingId, setQrPendingId] = useState('')
 
   // 密码登录状态
   const [pwdAccount, setPwdAccount] = useState('')
@@ -469,15 +478,21 @@ export function Accounts() {
         void cancelPwdSession(pwdSessionId)
       }
     }
+    if (activeModal === 'qrcode' && qrSessionId) {
+      // 二维码会话未走完就关弹窗（占位记录可能未转正/未过期）：触发一次状态查询
+      // 让后端走 expired/cancelled 分支清理 pending 空壳；已转正的返回 already_processed，无副作用
+      void checkQRLoginStatus(qrSessionId).catch(() => undefined)
+    }
     clearQrCheck()
     clearPwdCheck()
     clearPwdSuccessCloseTimer()
     setActiveModal(null)
     setQrCodeUrl('')
     setQrSessionId('')
-    setQrStatus('loading')
+    setQrStatus('idle')
     setQrErrorMessage('')
     setQrFaceQrUrl('')
+    setQrPendingId('')
     setPwdAccount('')
     setPwdPassword('')
     setPwdPasswordVisible(false)
@@ -494,7 +509,7 @@ export function Accounts() {
     setEditPasswordVisible(false)
     setAiTimeRangeStart('')
     setAiTimeRangeEnd('')
-  }, [activeModal, cancelPwdSession, clearPwdCheck, clearPwdSuccessCloseTimer, clearQrCheck, pwdSessionId, pwdStatus])
+  }, [activeModal, cancelPwdSession, clearPwdCheck, clearPwdSuccessCloseTimer, clearQrCheck, pwdSessionId, pwdStatus, qrSessionId])
 
   // ==================== 管理员默认密码检查 ====================
   /**
@@ -523,20 +538,44 @@ export function Accounts() {
   }
 
   // ==================== 扫码登录 ====================
+  // 第一步：打开弹窗，展示代理配置（可选），等待用户确认后生成二维码
   const startQRCodeLogin = async () => {
     // 管理员默认密码检查
     const passed = await checkAdminPassword()
     if (!passed) return
 
+    clearQrCheck()
+    setQrCodeUrl('')
+    setQrErrorMessage('')
+    setQrFaceQrUrl('')
+    setQrPendingId('')
+    setQrStatus('idle')
     setActiveModal('qrcode')
+  }
+
+  // 第二步：弹窗内点"生成二维码"才真正调接口（带代理则后端建占位记录并全程走代理）
+  const doGenerateQR = async () => {
+    if (qrUseProxy) {
+      if (!qrProxyHost.trim() || !qrProxyPort) {
+        addToast({ type: 'warning', message: '请填写代理地址和端口' })
+        return
+      }
+    }
     setQrStatus('loading')
     setQrErrorMessage('')
     setQrFaceQrUrl('')
     try {
-      const result = await generateQRLogin()
+      const result = await generateQRLogin(qrUseProxy ? {
+        proxy_type: qrProxyType,
+        proxy_host: qrProxyHost.trim(),
+        proxy_port: Number(qrProxyPort),
+        proxy_user: qrProxyUser.trim() || undefined,
+        proxy_pass: qrProxyPass || undefined,
+      } : undefined)
       if (result.success && result.qr_code_url && result.session_id) {
         setQrCodeUrl(result.qr_code_url)
         setQrSessionId(result.session_id)
+        setQrPendingId(result.pending_account_id || '')
         setQrStatus('ready')
         // 开始轮询
         startQrCheck(result.session_id)
@@ -617,25 +656,8 @@ export function Accounts() {
   }
 
   const refreshQRCode = async () => {
-    setQrStatus('loading')
-    setQrErrorMessage('')
-    setQrFaceQrUrl('')
     clearQrCheck()
-    try {
-      const result = await generateQRLogin()
-      if (result.success && result.qr_code_url && result.session_id) {
-        setQrCodeUrl(result.qr_code_url)
-        setQrSessionId(result.session_id)
-        setQrStatus('ready')
-        startQrCheck(result.session_id)
-      } else {
-        setQrStatus('error')
-        setQrErrorMessage(result.message || '生成二维码失败')
-      }
-    } catch {
-      setQrStatus('error')
-      setQrErrorMessage('生成二维码失败')
-    }
+    await doGenerateQR()
   }
 
   // ==================== 密码登录 ====================
@@ -2718,6 +2740,70 @@ export function Accounts() {
               </button>
             </div>
             <div className="modal-body flex flex-col items-center py-6">
+              {qrStatus === 'idle' && (
+                <div className="w-full flex flex-col gap-3 px-1">
+                  <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={qrUseProxy}
+                      onChange={(e) => setQrUseProxy(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>使用代理登录（新号推荐，Cookie 全程走代理出口签发）</span>
+                  </label>
+                  {qrUseProxy && (
+                    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+                      <div className="flex gap-2">
+                        <select
+                          value={qrProxyType}
+                          onChange={(e) => setQrProxyType(e.target.value as typeof qrProxyType)}
+                          className="input-ios flex-none w-24"
+                        >
+                          <option value="socks5">SOCKS5</option>
+                          <option value="http">HTTP</option>
+                          <option value="https">HTTPS</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={qrProxyHost}
+                          onChange={(e) => setQrProxyHost(e.target.value)}
+                          placeholder="代理地址"
+                          className="input-ios flex-1 min-w-0"
+                        />
+                        <input
+                          type="number"
+                          value={qrProxyPort}
+                          onChange={(e) => setQrProxyPort(e.target.value === '' ? '' : Number(e.target.value))}
+                          placeholder="端口"
+                          className="input-ios w-20 flex-none"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={qrProxyUser}
+                          onChange={(e) => setQrProxyUser(e.target.value)}
+                          placeholder="账号(可选)"
+                          className="input-ios flex-1 min-w-0"
+                        />
+                        <input
+                          type="password"
+                          value={qrProxyPass}
+                          onChange={(e) => setQrProxyPass(e.target.value)}
+                          placeholder="密码(可选)"
+                          className="input-ios flex-1 min-w-0"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <button onClick={doGenerateQR} className="btn-ios-primary btn-sm w-full">
+                    生成二维码
+                  </button>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                    使用代理时会自动创建占位记录，扫码成功后自动变为真实账号
+                  </p>
+                </div>
+              )}
               {qrStatus === 'loading' && (
                 <div className="flex flex-col items-center gap-3">
                   <Loader2 className="w-10 h-10 text-blue-600 dark:text-blue-400 animate-spin" />
@@ -2728,6 +2814,11 @@ export function Accounts() {
                 <div className="flex flex-col items-center gap-3">
                   <img src={qrCodeUrl} alt="登录二维码" className="w-44 h-44 rounded-lg border" />
                   <p className="text-sm text-slate-600 dark:text-slate-300">请使用闲鱼APP扫描二维码</p>
+                  {qrUseProxy && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                      全程代理出口登录中{qrPendingId ? `（占位记录 ${qrPendingId}）` : ''}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-400 dark:text-slate-500">二维码有效期约5分钟</p>
                 </div>
               )}

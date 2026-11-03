@@ -353,14 +353,25 @@ export const passwordLogin = (data: { account_id: string; account: string; passw
 }
 
 // 生成扫码登录二维码
-export const generateQRLogin = async (): Promise<{ success: boolean; session_id?: string; qr_code_url?: string; message?: string }> => {
-  const result = await post<{ success: boolean; message: string; data?: { session_id: string; qr_code_url: string } }>(`${QR_LOGIN_PREFIX}/generate`)
+// 传入代理字段时：后端会先建一条占位账号记录（代理写入该记录），
+// 且二维码生成/轮询全程走该代理出口；扫码成功后占位记录转正。
+export interface QRLoginProxyPayload {
+  proxy_type?: string
+  proxy_host?: string
+  proxy_port?: number
+  proxy_user?: string
+  proxy_pass?: string
+}
+
+export const generateQRLogin = async (proxy?: QRLoginProxyPayload): Promise<{ success: boolean; session_id?: string; qr_code_url?: string; pending_account_id?: string; message?: string }> => {
+  const result = await post<{ success: boolean; message: string; data?: { session_id: string; qr_code_url: string; pending_account_id?: string } }>(`${QR_LOGIN_PREFIX}/generate`, proxy ?? {})
   // 从标准ApiResponse格式中提取数据
   return {
     success: result.success,
     message: result.message,
     session_id: result.data?.session_id,
     qr_code_url: result.data?.qr_code_url,
+    pending_account_id: result.data?.pending_account_id,
   }
 }
 

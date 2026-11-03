@@ -74,7 +74,7 @@ async def run_face_verification(
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=manager.timeout,
-            proxy=manager.proxy,
+            proxy=session.proxy,
             cookies=session.cookies,
             headers=manager.headers,
         ) as client:
