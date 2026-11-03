@@ -50,6 +50,13 @@ from common.services.captcha.win_input import (
     send_move_abs,
     timer_resolution,
 )
+from common.services.proxy_factory import (
+    ProxyConfigError,
+    load_account_proxy_fields,
+    playwright_proxy,
+    require_proxy,
+    webrtc_policy_args,
+)
 
 from playwright.sync_api import sync_playwright
 
@@ -481,19 +488,43 @@ class _RealMouseSolver:
         self._acquire_browser_lock()
         # 当前进程没有可用上下文时，先清理固定目录对应的孤儿 Chrome。
         self._kill_browser_processes(log_result=False)
+        # 阶段E: 按账号加载代理 + WebRTC 封堵(无论是否配代理都附加)
+        proxy_fields = load_account_proxy_fields(self.pure_id)
+        proxy_dict = None
+        try:
+            require_proxy(
+                proxy_fields["proxy_type"], proxy_fields["proxy_host"],
+                proxy_fields["proxy_port"], context="真实鼠标滑块浏览器",
+            )
+            proxy_dict = playwright_proxy(
+                proxy_fields["proxy_type"], proxy_fields["proxy_host"],
+                proxy_fields["proxy_port"], proxy_fields["proxy_user"],
+                proxy_fields["proxy_pass"],
+            )
+        except ProxyConfigError:
+            self._release_browser_lock()
+            raise
+        except Exception as proxy_e:
+            logger.warning(f"【{self.pure_id}】真实鼠标代理配置异常, 本机直连: {proxy_e}")
+        launch_args = list(_BROWSER_ARGS) + webrtc_policy_args()
+        if proxy_dict:
+            logger.info(f"【{self.pure_id}】真实鼠标滑块走代理 {proxy_dict.get('server')}")
+        else:
+            logger.info(f"【{self.pure_id}】真实鼠标滑块未配置代理, 本机直连")
         try:
             self.pw = sync_playwright().start()
             self.context = self.pw.chromium.launch_persistent_context(
                 self.browser_dir,
                 channel="chrome",          # 用本机真实 Chrome（自然指纹），非自带 Chromium
                 headless=False,            # 真实鼠标必须有可见窗口
-                args=_BROWSER_ARGS,
+                args=launch_args,
                 no_viewport=True,          # 不强制 viewport，保留真实窗口尺寸
                 locale="zh-CN",
                 timezone_id="Asia/Shanghai",
                 ignore_https_errors=True,
                 extra_http_headers={"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
                 timeout=30000,
+                **({"proxy": proxy_dict} if proxy_dict else {}),
             )
         except Exception:
             self._release_browser_lock()

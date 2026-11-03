@@ -121,3 +121,58 @@ def resolve_proxy_fields(account: Any) -> Dict[str, Any]:
         "proxy_user": getattr(account, "proxy_user", None),
         "proxy_pass": getattr(account, "proxy_pass", None),
     }
+
+
+def load_account_proxy_fields(account_id: str) -> Dict[str, Any]:
+    """按 account_id 从数据库同步读取代理字段, 供浏览器启动点使用。
+
+    浏览器启动点(slider_stealth/real_mouse/cookie_renew)是同步上下文(sync_playwright),
+    无法用 async session。这里用 sync 驱动(pymysql) + 短连接引擎查询, 用完即释放,
+    不占用常驻连接池。账号不存在或查询失败时返回默认 'none' 配置(=维持现状直连,
+    是否允许直连由 fail-closed 上游决定)。
+
+    返回结构与 resolve_proxy_fields 一致。
+    """
+    empty = {
+        "proxy_type": "none",
+        "proxy_host": None,
+        "proxy_port": None,
+        "proxy_user": None,
+        "proxy_pass": None,
+    }
+    try:
+        from sqlalchemy import create_engine, select
+        from common.core.config import get_settings
+        from common.models.xy_account import XYAccount
+
+        settings = get_settings()
+        engine = create_engine(settings.database_url, poolclass=None, connect_args={"connect_timeout": 5})
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    select(
+                        XYAccount.proxy_type,
+                        XYAccount.proxy_host,
+                        XYAccount.proxy_port,
+                        XYAccount.proxy_user,
+                        XYAccount.proxy_pass,
+                    )
+                    .where(XYAccount.account_id == account_id)
+                    .order_by(XYAccount.id.desc())
+                    .limit(1)
+                ).first()
+        finally:
+            engine.dispose()
+        if not row:
+            logger.debug(f"【{account_id}】浏览器代理: 账号不存在, 用默认直连")
+            return empty
+        return {
+            "proxy_type": row.proxy_type or "none",
+            "proxy_host": row.proxy_host or None,
+            "proxy_port": row.proxy_port or None,
+            "proxy_user": row.proxy_user or None,
+            "proxy_pass": row.proxy_pass or None,
+        }
+    except Exception as e:
+        logger.warning(f"【{account_id}】浏览器代理: 查询失败, 用默认直连: {e}")
+        return empty

@@ -33,6 +33,13 @@ from common.services.captcha.playwright_touch import (
 )
 from common.utils.xianyu_utils import browser_user_agent
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path, is_frozen
+from common.services.proxy_factory import (
+    ProxyConfigError,
+    load_account_proxy_fields,
+    playwright_proxy,
+    require_proxy,
+    webrtc_policy_args,
+)
 
 try:
     from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, ElementHandle
@@ -302,6 +309,32 @@ class PlaywrightSliderService:
             args.append(f"--window-size={browser_features['window_size']}")
             args.append(f"--lang={browser_features['lang']}")
             args.append(f"--accept-lang={browser_features['accept_lang']}")
+            # 阶段E: 封堵 WebRTC 暴露本机网卡 IP(R1.8), 无论是否配代理都附加
+            args.extend(webrtc_policy_args())
+
+            # 阶段E: 按账号加载代理配置并翻译为 playwright proxy dict。
+            # fail-closed: 账号已配置代理但缺关键字段时 require_proxy 抛 ProxyConfigError,
+            # 由上层决定是否终止(保持阶段D语义); 此处仅在拿到合法配置时注入 proxy。
+            proxy_fields = load_account_proxy_fields(self.pure_user_id)
+            proxy_dict = None
+            try:
+                require_proxy(
+                    proxy_fields["proxy_type"], proxy_fields["proxy_host"],
+                    proxy_fields["proxy_port"], context=f"滑块浏览器",
+                )
+                proxy_dict = playwright_proxy(
+                    proxy_fields["proxy_type"], proxy_fields["proxy_host"],
+                    proxy_fields["proxy_port"], proxy_fields["proxy_user"],
+                    proxy_fields["proxy_pass"],
+                )
+            except ProxyConfigError:
+                raise
+            except Exception as proxy_e:
+                logger.warning(f"【{self.pure_user_id}】代理配置异常, 本机直连: {proxy_e}")
+            if proxy_dict:
+                logger.info(f"【{self.pure_user_id}】滑块浏览器走代理 {proxy_dict.get('server')}")
+            else:
+                logger.info(f"【{self.pure_user_id}】滑块浏览器未配置代理, 本机直连")
 
             logger.info(f"【{self.pure_user_id}】启动浏览器，headless模式: {self.headless}")
             logger.info(f"【{self.pure_user_id}】使用用户数据目录: {self.user_data_dir}")
@@ -342,6 +375,9 @@ class PlaywrightSliderService:
                 # 密码登录分支也统一为单一来源 UA(不再用旧的 138 字面量)
                 launch_kwargs['viewport'] = {'width': 1980, 'height': 1024}
                 launch_kwargs['user_agent'] = browser_user_agent()
+            if proxy_dict:
+                launch_kwargs['proxy'] = proxy_dict
+
             executable_path = self._find_browser_executable()
             if executable_path:
                 launch_kwargs['executable_path'] = executable_path
