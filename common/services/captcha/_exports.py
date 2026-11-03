@@ -17,6 +17,7 @@ from common.services.captcha.strategy_stats import (
     strategy_stats,
 )
 from common.services.captcha.browser_features import (
+    get_account_browser_features,
     get_random_browser_features,
     get_stealth_script,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "strategy_stats",
     # 浏览器特征
     "get_random_browser_features",
+    "get_account_browser_features",
     "get_stealth_script",
     # 轨迹生成
     "TrajectoryGenerator",

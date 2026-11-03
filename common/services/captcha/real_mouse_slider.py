@@ -447,7 +447,11 @@ def _scale_drag_to_distance(
 
 
 class _RealMouseSolver:
-    """可复用真实鼠标滑块求解器（固定浏览器目录、自然指纹）。"""
+    """可复用真实鼠标滑块求解器（每账号独立浏览器目录、自然指纹）。
+
+    阶段C: 每账号独立 browser_dir(替代原全局 _REAL_MOUSE_BROWSER_DIR 单实例),
+    实现账号级隔离; 全局物理鼠标串行锁仍由外层 account lock 保证。
+    """
 
     def __init__(self, user_id: str):
         self.user_id = str(user_id)
@@ -455,7 +459,12 @@ class _RealMouseSolver:
         self.pw = None
         self.context = None
         self.page = None
-        self.browser_dir = _REAL_MOUSE_BROWSER_DIR
+        # 每账号独立目录(阶段C): browser_data/real_mouse/<pure_id>/
+        self.browser_dir = os.path.join(
+            os.path.dirname(_REAL_MOUSE_BROWSER_DIR),
+            "real_mouse",
+            self.pure_id,
+        )
         os.makedirs(self.browser_dir, exist_ok=True)
         self._browser_lock_file = None
         self._slide_code: Optional[int] = None
@@ -464,7 +473,7 @@ class _RealMouseSolver:
 
     # ---------- 浏览器 ----------
     def update_user(self, user_id: str) -> None:
-        """更新当前任务日志标识，不改变共享浏览器实例。"""
+        """更新当前任务日志标识，不改变本账号浏览器实例（目录已按 pure_id 固定）。"""
         self.user_id = str(user_id)
         self.pure_id = self.user_id.split("_")[0] if "_" in self.user_id else self.user_id
 
@@ -512,12 +521,14 @@ class _RealMouseSolver:
         self.page.bring_to_front()
 
     def _acquire_browser_lock(self) -> None:
-        """跨进程独占固定浏览器目录，防止多个服务进程同时启动真人鼠标 Chrome。"""
+        """跨进程独占本账号浏览器目录，防止多服务进程同时启动同一账号真人鼠标 Chrome。"""
         if self._browser_lock_file is not None:
             return
         if sys.platform != "win32" or msvcrt is None:
             return
-        lock_file = open(_REAL_MOUSE_BROWSER_LOCK, "a+b")
+        os.makedirs(self.browser_dir, exist_ok=True)
+        lock_path = os.path.join(self.browser_dir, "browser.lock")
+        lock_file = open(lock_path, "a+b")
         try:
             lock_file.seek(0, os.SEEK_END)
             if lock_file.tell() == 0:
@@ -1141,7 +1152,9 @@ class _RealMouseSolver:
         return x5
 
 
-_shared_solver: Optional[_RealMouseSolver] = None
+# 阶段C: 按账号(pure_id)的 solver 映射, 替代原全局单实例。
+# 全局物理鼠标串行仍由外层 account_browser_lock_manager 保证(同一时刻只操作一个窗口)。
+_solvers: dict[str, _RealMouseSolver] = {}
 _real_mouse_executor: Optional[ThreadPoolExecutor] = None
 _real_mouse_executor_lock = threading.Lock()
 
@@ -1160,25 +1173,28 @@ def _get_real_mouse_executor() -> ThreadPoolExecutor:
 
 
 def _get_shared_solver(user_id: str) -> _RealMouseSolver:
-    """获取真人鼠标进程级共享浏览器实例。"""
-    global _shared_solver
-    if _shared_solver is None:
-        _shared_solver = _RealMouseSolver(user_id)
+    """按账号(pure_id)获取独立真人鼠标求解器实例。
+
+    阶段C: 每账号独立 browser_dir 与 Chrome profile, 实现账号级隔离。
+    """
+    pure_id = str(user_id).split("_")[0] if "_" in str(user_id) else str(user_id)
+    solver = _solvers.get(pure_id)
+    if solver is None:
+        solver = _RealMouseSolver(pure_id)
+        _solvers[pure_id] = solver
     else:
-        _shared_solver.update_user(user_id)
-    return _shared_solver
+        solver.update_user(user_id)
+    return solver
 
 
 def _close_shared_solver_in_worker() -> None:
-    """在真人鼠标专用线程中关闭共享浏览器。"""
-    global _shared_solver
-    if _shared_solver is None:
-        return
-    try:
-        _shared_solver.close()
-    except Exception:
-        pass
-    _shared_solver = None
+    """在真人鼠标专用线程关闭全部账号求解器。"""
+    for pure_id, solver in list(_solvers.items()):
+        try:
+            solver.close()
+        except Exception:
+            pass
+        _solvers.pop(pure_id, None)
 
 
 def _shutdown_real_mouse_executor() -> None:

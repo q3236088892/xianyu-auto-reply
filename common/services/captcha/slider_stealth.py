@@ -22,7 +22,7 @@ from loguru import logger
 
 from common.services.captcha.concurrency import concurrency_manager, account_browser_lock_manager
 from common.services.captcha.strategy_stats import strategy_stats
-from common.services.captcha.browser_features import get_random_browser_features, get_stealth_script
+from common.services.captcha.browser_features import get_account_browser_features, get_stealth_script
 from common.services.captcha.trajectory import TrajectoryGenerator
 from common.services.captcha.slider_elements import SliderElementFinder
 from common.services.captcha.verification_checker import VerificationChecker
@@ -276,7 +276,7 @@ class PlaywrightSliderService:
                     )
                 logger.info(f"【{self.pure_user_id}】Playwright启动成功")
 
-            browser_features = get_random_browser_features()
+            browser_features = get_account_browser_features(self.pure_user_id)
 
             if add_stealth_script and self._slider_profile_tempdir is None:
                 slider_sessions_dir = os.path.join(
@@ -310,28 +310,34 @@ class PlaywrightSliderService:
             launch_kwargs = {
                 'headless': self.headless,
                 'args': args,
-                'locale': 'zh-CN',
+                'locale': browser_features['locale'],
                 'accept_downloads': True,
                 'ignore_https_errors': True,
                 'extra_http_headers': {
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+                    'Accept-Language': browser_features['accept_lang']
                 }
             }
             if add_stealth_script:
                 # 有头模式使用真实窗口尺寸，避免 viewport、outerWidth 与 screen 指纹冲突；
                 # 无头环境没有真实桌面，继续给出稳定视口保证页面布局可计算。
                 if self.headless:
-                    launch_kwargs['viewport'] = {'width': 1920, 'height': 1080}
+                    launch_kwargs['viewport'] = {
+                        'width': browser_features['viewport_width'],
+                        'height': browser_features['viewport_height'],
+                    }
                 else:
                     launch_kwargs['no_viewport'] = True
-                launch_kwargs['timezone_id'] = 'Asia/Shanghai'
+                launch_kwargs['timezone_id'] = browser_features['timezone_id']
                 if not self._cdp_touch_enabled:
                     launch_kwargs['ignore_default_args'] = ['--enable-automation']
                 launch_kwargs['user_agent'] = browser_user_agent()
                 launch_kwargs['has_touch'] = self._cdp_touch_enabled
                 launch_kwargs['is_mobile'] = False
                 if self.headless:
-                    launch_kwargs['screen'] = {'width': 1920, 'height': 1080}
+                    launch_kwargs['screen'] = {
+                        'width': browser_features['screen_width'],
+                        'height': browser_features['screen_height'],
+                    }
             else:
                 # 密码登录分支也统一为单一来源 UA(不再用旧的 138 字面量)
                 launch_kwargs['viewport'] = {'width': 1980, 'height': 1024}
