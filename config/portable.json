@@ -7,12 +7,14 @@
     "backend-web": 8089,
     "websocket": 8090,
     "scheduler": 8091,
+    "promotion": 8092,
     "frontend": 9000
   },
   "candidate_service_ports": {
     "backend-web": 18089,
     "websocket": 18090,
     "scheduler": 18091,
+    "promotion": 18092,
     "frontend": 19000
   },
   "mysql": {

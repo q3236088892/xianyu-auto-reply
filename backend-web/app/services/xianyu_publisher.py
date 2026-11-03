@@ -409,6 +409,41 @@ class XianyuPublisher:
         """上传商品图片列表（按原项目流程）"""
         logger.info(f"[步骤4] 📷 上传 {len(images)} 张商品图片...")
 
+        # 网络监听：记录上传相关的 XHR 请求和响应，用于诊断哪张图的上传请求失败
+        upload_requests = []  # list of dict: {url, method, status, timestamp}
+        last_upload_idx = [0]  # 当前正在上传的图片序号
+
+        async def on_request(request):
+            url = request.url
+            if any(kw in url for kw in ['upload', 'image', 'photo', 'pic', 'file', 'mtop']):
+                if 'goofish' in url or 'alicdn' in url or 'taobao' in url or 'alibaba' in url:
+                    upload_requests.append({
+                        'idx': last_upload_idx[0],
+                        'url': url[:200],
+                        'method': request.method,
+                        'ts': asyncio.get_event_loop().time(),
+                    })
+                    logger.info(f"🌐 [网络] 图片 {last_upload_idx[0]} 发起请求: {request.method} {url[:120]}")
+
+        async def on_response(response):
+            url = response.url
+            if any(kw in url for kw in ['upload', 'image', 'photo', 'pic', 'file']):
+                if 'goofish' in url or 'alicdn' in url or 'taobao' in url:
+                    body_preview = ''
+                    try:
+                        if response.status >= 400 or 'upload' in url:
+                            body = await response.text()
+                            body_preview = body[:500]
+                    except:
+                        pass
+                    logger.info(f"🌐 [网络] 响应 {response.status}: {url[:120]}")
+                    if body_preview:
+                        logger.info(f"🌐 [网络] 响应体: {body_preview}")
+
+        if self.page:
+            self.page.on('request', lambda req: asyncio.ensure_future(on_request(req)))
+            self.page.on('response', lambda resp: asyncio.ensure_future(on_response(resp)))
+
         add_image_selectors = [
             'span:has-text("添加首图")',
             'div:has-text("添加首图")',
@@ -524,8 +559,11 @@ class XianyuPublisher:
         # 结论：占位图会被替换，基准不可靠。真正稳定的事实是——
         #   每张图上传后，页面预览图的绝对数量应达到当前序号 i；
         #   全部完成后，绝对数量应等于图片总数。故这里直接用绝对数量，不做任何基准减法。
+        # 注意：闲鱼发布页的 file input 是唯一的常驻元素（不会随上传张数增加），
+        # 每次 set_input_files 复用同一个 input 即可触发上传。
         for i, image_path in enumerate(images, 1):
             try:
+                last_upload_idx[0] = i  # 供网络监听回调标记当前图片序号
                 file_path = await self._resolve_upload_image_path(str(image_path))
 
                 logger.info(f"上传第 {i}/{len(images)} 张图片: {file_path}")
@@ -558,6 +596,18 @@ class XianyuPublisher:
                 await file_input.set_input_files(file_path)
                 logger.info(f"✅ 已选择图片 {i}")
 
+                # 主动触发 input 的 change 事件，确保 React 组件能捕获到文件变化。
+                # 前面几张图 Playwright 的 set_input_files 会自动触发，
+                # 但最后一张（达到上限时）前端可能不再监听，需要手动 dispatch。
+                await self.page.evaluate("""() => {
+                    const input = document.querySelector('input[type="file"][accept*="image"]');
+                    if (input) {
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }""")
+                logger.info(f"已触发 change/input 事件")
+
                 # 轮询等待页面预览图的绝对数量达到当前序号 i，最多等 30 秒。
                 # 用绝对目标 i（而非基准偏移或增量累加），避开占位图被替换、
                 # 并发渲染漏计等所有历史坑。
@@ -573,6 +623,8 @@ class XianyuPublisher:
                     logger.warning(
                         f"⚠️ 图片 {i} 在 30 秒内未确认上传成功（预览图 {now_count} 张，目标 {target}）"
                     )
+                    # 诊断：dump 页面状态，帮助定位为何预览图没有增加
+                    await self._diagnose_image_upload_state(i, file_path, now_count, target, upload_requests)
 
                 if i < len(images):
                     await asyncio.sleep(2)
@@ -626,6 +678,64 @@ class XianyuPublisher:
         self._expected_image_count = total
 
         logger.info(f"✅ 共上传 {final_count}/{total} 张图片")
+
+    async def _diagnose_image_upload_state(self, i: int, file_path: str, now_count: int, target: int, upload_requests: list = None):
+        """图片上传超时后的诊断：dump 页面上传区域的状态，帮助定位为何预览图没有增加。"""
+        try:
+            logger.warning(f"🔍 [诊断] 第 {i} 张上传超时，开始 dump 页面状态...")
+
+            # 0) 该图相关的网络请求
+            if upload_requests:
+                relevant = [r for r in upload_requests if r['idx'] == i]
+                if relevant:
+                    logger.warning(f"🔍 [诊断] 第 {i} 张共发起 {len(relevant)} 个网络请求:")
+                    for r in relevant[-5:]:  # 最多打5条
+                        logger.warning(f"🔍 [诊断]   {r['method']} {r['url']}")
+                else:
+                    logger.warning(f"🔍 [诊断] 第 {i} 张没有发起任何上传相关的网络请求！")
+
+            # 1) 所有 file input 的状态
+            all_inputs = await self.page.query_selector_all('input[type="file"]')
+            logger.warning(f"🔍 [诊断] 页面共有 {len(all_inputs)} 个 file input")
+            for idx, inp in enumerate(all_inputs):
+                try:
+                    accept = await inp.get_attribute("accept")
+                    name = await inp.get_attribute("name")
+                    visible = await inp.is_visible()
+                    logger.warning(f"🔍 [诊断]   input[{idx}]: accept={accept}, name={name}, visible={visible}")
+                except Exception as e:
+                    logger.warning(f"🔍 [诊断]   input[{idx}]: 读取属性失败: {e}")
+
+            # 2) "添加细节图" / "添加" 按钮是否还存在
+            for selector in ['span:has-text("添加细节图")', 'div:has-text("添加细节图")',
+                             'span:has-text("添加")', 'div:has-text("添加")']:
+                btn = await self.page.query_selector(selector)
+                if btn:
+                    try:
+                        txt = await btn.inner_text()
+                        visible = await btn.is_visible()
+                        logger.warning(f"🔍 [诊断] 找到按钮 [{txt}] visible={visible} (selector={selector})")
+                    except:
+                        pass
+
+            # 3) 上传区域的 HTML 片段（前 3000 字符）
+            try:
+                html = await self.page.evaluate("""() => {
+                    const upload = document.querySelector('[class*="upload"]')
+                        || document.querySelector('[class*="imgList"]')
+                        || document.querySelector('[class*="image"]');
+                    return upload ? upload.outerHTML.substring(0, 3000) : '(未找到上传区域)';
+                }""")
+                logger.warning(f"🔍 [诊断] 上传区域 HTML 片段:\n{html}")
+            except Exception as e:
+                logger.warning(f"🔍 [诊断] 获取上传区域 HTML 失败: {e}")
+
+            # 4) 页面 URL 和 title
+            logger.warning(f"🔍 [诊断] 当前URL: {self.page.url}")
+            logger.warning(f"🔍 [诊断] 页面标题: {await self.page.title()}")
+
+        except Exception as e:
+            logger.warning(f"🔍 [诊断] 诊断过程出错: {e}")
 
     async def _set_item_address(self, item_data: dict):
         address = (item_data.get("address") or "").strip()
@@ -1108,6 +1218,38 @@ class XianyuPublisher:
 
         raise Exception(f"未找到可关闭宝贝所在地弹窗的“{address}”候选")
 
+    # 闲鱼发布页会校验"商品描述不能包含emoji"，命中即静默拦截提交。
+    # 在写入富文本编辑器前先把这些符号清掉，避免页面停留、按钮无响应。
+    # 范围覆盖：emoji 表情、各类装饰符号、麻将/扑克牌字符、封闭字母/表意补充，
+    # 以及常见的 ✓ / ✔ / ✅ / ✗ / ❎ / ☑ / ⭐ / ✨ / ➕ / ➖ / … 等。
+    _EMOJI_PATTERN = re.compile(
+        "["
+        "\U0001F300-\U0001FAFF"
+        "\U0001F000-\U0001F1FF"
+        "\U0001F200-\U0001F2FF"
+        "\U0001F600-\U0001F64F"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA70-\U0001FAFF"
+        "⌀-⏿"
+        "☀-⛿"
+        "✀-➿"
+        "⬀-⭿"
+        "︀-️"
+        "‍"
+        "]+",
+        flags=re.UNICODE,
+    )
+
+    @classmethod
+    def _strip_emojis(cls, text: str) -> str:
+        """移除 emoji / 装饰符号，避免触发闲鱼"商品描述不能包含emoji"校验。"""
+        if not text:
+            return text
+        cleaned = cls._EMOJI_PATTERN.sub("", text)
+        # 去掉 emoji 后把残留的多余空白/全角空格折叠成单个半角空格
+        cleaned = re.sub(r"[ \t　]+", " ", cleaned)
+        return cleaned
+
     async def _fill_description(self, item_data: dict):
         """填写宝贝描述（按原项目流程）"""
         desc_selectors = [
@@ -1143,7 +1285,9 @@ class XianyuPublisher:
         else:
             full_description = description
 
-        logger.info(f"描述内容: {full_description[:100]}...")
+        # 写入富文本前剥离 emoji/装饰符号，避免触发闲鱼"商品描述不能包含emoji"拦截
+        full_description = self._strip_emojis(full_description)
+        logger.info(f"描述内容（去emoji后）: {full_description[:100]}...")
         await desc_input.click()
         await asyncio.sleep(0.5)
         await desc_input.evaluate(f"el => el.innerText = {json.dumps(full_description, ensure_ascii=False)}")
@@ -1829,7 +1973,6 @@ class XianyuPublisher:
 
             elif '发闲置' in current_url or 'publish' in current_url:
                 result["success"] = False
-                result["message"] = '可能发布失败（页面未跳转，仍停留在发布页）'
                 result["failure_reason"] = 'page_not_redirected'
                 logger.warning("⚠️ 可能发布失败")
                 logger.warning("⚠️ 页面未跳转，仍停留在发布页")
@@ -1838,30 +1981,43 @@ class XianyuPublisher:
                 # 诊断增强：未跳转时把页面完整文本打印出来、截图存盘，
                 # 便于判断到底是"请选择分类"字段校验、风控验证还是审核拦截，
                 # 避免靠猜测反复试错。
-                await self._dump_publish_failure_context(page_text)
+                hints = await self._dump_publish_failure_context(page_text)
+                base_msg = '可能发布失败（页面未跳转，仍停留在发布页）'
+                if hints:
+                    result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}"
+                else:
+                    result["message"] = base_msg
 
             else:
                 result["success"] = False
-                result["message"] = '无法确认发布状态'
                 result["failure_reason"] = 'unknown'
                 logger.warning("⚠️ 无法确认发布状态")
                 logger.warning(f"⚠️ 当前URL: {current_url}")
                 logger.warning(f"⚠️ 页面文本: {page_text[:200]}")
                 logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
-                await self._dump_publish_failure_context(page_text)
+                hints = await self._dump_publish_failure_context(page_text)
+                base_msg = '无法确认发布状态'
+                if hints:
+                    result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}"
+                else:
+                    result["message"] = base_msg
 
         else:
             result["message"] = '未找到发布按钮'
             logger.error("❌ 未找到发布按钮")
 
-    async def _dump_publish_failure_context(self, page_text: str) -> None:
+    async def _dump_publish_failure_context(self, page_text: str) -> list[str]:
         """发布未跳转时，转储页面文本与整页截图，供事后定位真实拦截原因。
 
         - 把页面完整可见文本打到日志（截断到 2000 字，避免刷屏）；
         - 命中一批常见关键词时明确点名（请选择分类 / 验证 / 审核 / 风控等）；
         - 把整页截图存到 logs/app/publish_failures/ 下，文件名带时间戳。
         这样"页面未跳转"不再只是猜测，而有据可查。
+
+        返回命中到的关键词列表，方便调用方把它挂到 result["message"] 上回传前端，
+        避免前端只看到笼统的"页面未跳转"而无从下手。
         """
+        hit: list[str] = []
         try:
             logger.warning("—— 发布失败页面文本（截断 2000 字）——")
             logger.warning((page_text or "")[:2000])
@@ -1872,6 +2028,7 @@ class XianyuPublisher:
                 "请选择分类", "请选择", "请填写", "必填", "不能为空",
                 "验证", "滑动", "拖动", "安全", "校验",
                 "审核", "风控", "违规", "限制", "频繁", "异常",
+                "商品描述不能包含emoji", "请输入宝贝的品牌",
             ]
             hit = [kw for kw in hints if kw and kw in (page_text or "")]
             if hit:
@@ -1889,6 +2046,7 @@ class XianyuPublisher:
             logger.warning(f"⚠️ 发布失败整页截图已保存: {shot_path.resolve()}")
         except Exception as exc:
             logger.warning(f"转储发布失败上下文时出错（忽略）: {exc}")
+        return hit
 
     async def close_only_browser(self):
         """只关闭浏览器，不停止playwright"""

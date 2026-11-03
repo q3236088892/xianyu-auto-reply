@@ -46,7 +46,7 @@ def _upstream_owner_repo(upstream_url: str) -> str:
     return match.group(1)
 
 
-MAIN_SERVICE_ORDER = ("backend-web", "websocket", "scheduler", "frontend")
+MAIN_SERVICE_ORDER = ("backend-web", "websocket", "scheduler", "promotion", "frontend")
 PYTHON_SERVICE_ORDER = ("backend-web", "websocket", "scheduler")
 DEPENDENCY_SERVICE_ORDER = ("mysql", "redis")
 MARIADB_VERSION = "10.11.18"
@@ -254,6 +254,7 @@ def service_specs(config: Mapping[str, Any], *, candidate: bool = False) -> list
         ServiceSpec("backend-web", "python", ports["backend-web"], "backend-web", "main.py"),
         ServiceSpec("websocket", "python", ports["websocket"], "websocket", "main.py"),
         ServiceSpec("scheduler", "python", ports["scheduler"], "scheduler", "main.py"),
+        ServiceSpec("promotion", "python", ports["promotion"], "promotion/backend", "main.py"),
         ServiceSpec("frontend", "frontend", ports["frontend"], "frontend", None, "/"),
     ]
 
@@ -1298,6 +1299,14 @@ def _frontend_proxy_target(config: Mapping[str, Any]) -> str:
 
 
 class FrontendRequestHandler(http.server.SimpleHTTPRequestHandler):
+    # 禁用所有代理的 opener：转发目标永远是本地后端 127.0.0.1:8089，
+    # 绝不能经过任何系统代理。Windows 上 urllib 默认会读取注册表里的系统
+    # 代理设置（如 v2rayN 的 127.0.0.1:7890），并在进程内缓存；一旦代理软件
+    # 关闭，进程仍死守旧代理去连本地后端，导致连接失败、返回 502——表现为
+    # “开着代理软件能登录、关了就登录失败”。用 ProxyHandler({}) 彻底关闭代理，
+    # 让转发始终直连本地后端，摆脱对任何代理软件的依赖。
+    _no_proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
     def __init__(self, *args, dist_dir: str = "", backend_url: str = "", **kwargs):
         self._dist_dir = dist_dir
         self._backend_url = backend_url.rstrip("/")
@@ -1317,7 +1326,7 @@ class FrontendRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 其余接口维持较短超时，避免异常请求长期占用连接。
         timeout = 600 if "/product-publish/publish/" in self.path else 120
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with self._no_proxy_opener.open(request, timeout=timeout) as response:
                 self._relay_response(response, method)
         except urllib.error.HTTPError as http_error:
             # 后端返回的 4xx/5xx（如 401 未授权）会被 urllib 当成异常抛出。
@@ -1567,6 +1576,7 @@ def verify(root: Path | str) -> dict[str, Any]:
         str(source / "backend-web"),
         str(source / "websocket"),
         str(source / "scheduler"),
+        str(source / "promotion" / "backend"),
         str(source / "common"),
     ]
     result = subprocess.run(

@@ -149,6 +149,12 @@ from app.api import api_router
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
+@app.get("/health")
+async def health_check():
+    """健康检查接口（与 backend-web / websocket / scheduler 一致，挂载在根路径）"""
+    return {"success": True, "message": "推广返佣服务运行正常"}
+
+
 # 配置日志（使用公共日志工具，统一日志格式和保留策略）
 from common.utils.logging_utils import setup_logging
 setup_logging(

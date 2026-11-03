@@ -2,12 +2,22 @@
 from __future__ import annotations
 
 import sys
+import importlib.util
 from pathlib import Path
 
-# 添加项目根目录到sys.path（兼容common模块导入，必须先于业务导入）
-project_root = Path(__file__).resolve().parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+# 将当前目录和项目根目录添加到 Python 路径（必须先于业务导入）
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent.parent
+sys.path.insert(0, str(current_dir))
+sys.path.insert(0, str(project_root))
+
+# 显式从当前目录加载 _bootstrap（兼容 Nuitka 打包环境 / runpy 启动方式）
+_bootstrap_file = current_dir / "_bootstrap.py"
+if _bootstrap_file.exists() and "_bootstrap" not in sys.modules:
+    _spec = importlib.util.spec_from_file_location("_bootstrap", str(_bootstrap_file))
+    _mod = importlib.util.module_from_spec(_spec)
+    sys.modules["_bootstrap"] = _mod
+    _spec.loader.exec_module(_mod)
 
 from _bootstrap import app  # noqa: E402
 
