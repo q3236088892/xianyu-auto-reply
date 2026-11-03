@@ -34,7 +34,7 @@ from common.services.captcha.concurrency import (
     concurrency_manager,
     run_browser_task,
 )
-from common.utils.xianyu_utils import trans_cookies
+from common.utils.xianyu_utils import browser_user_agent, trans_cookies
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path
 
 try:
@@ -423,11 +423,7 @@ class CookieRenewBrowserService:
                 "headless": False,
                 "args": self.BROWSER_ARGS,
                 "viewport": {"width": 1280, "height": 720},
-                "user_agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/146.0.0.0 Safari/537.36"
-                ),
+                "user_agent": browser_user_agent(),
                 "locale": "zh-CN",
                 "timezone_id": "Asia/Shanghai",
             }

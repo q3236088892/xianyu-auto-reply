@@ -7,14 +7,203 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
+import os
 import random
 import struct
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from loguru import logger
+
+
+# ============================================================================
+# 浏览器身份单一来源 (阶段 A: 统一 UA / client hints)
+# ============================================================================
+# 所有面向闲鱼的出站请求(扫码/密码/人脸/mtop/IM/WebSocket/浏览器)必须从
+# 这里的访问器取 UA 与 client hints, 禁止再写字面量。探测结果 lru_cache
+# 缓存, 进程生命周期内固定, 保证同一账号任意时刻自洽。
+#
+# 版本探测优先级(真实可信度的代理):
+#   1. BLBeacon.version           —— Chrome 自报当前真实版本(最准)
+#   2. User Data/Last Version     —— Chrome 最后一次写入磁盘的版本
+#   3. 已安装 playwright chromium —— 滑块 stealth 实际用的内核
+#   4. _FALLBACK_CHROME_VERSION   —— 兜底(必须与线上稳定版大版本接近)
+# ============================================================================
+
+# 品牌顺序与占位版本 "Not(A:Brand";v="24" 已按真实 Chrome 抓包校准(2026-11-03,
+# Chrome 155, sec-ch-ua: "Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24")
+_FALLBACK_CHROME_VERSION = "155.0.8059.85"
+_UA_TEMPLATE = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/{major}.0.0.0 Safari/537.36"
+)
+
+
+def _read_blbeacon_version() -> str | None:
+    """从注册表 HKCU\\Software\\Google\\Chrome\\BLBeacon 读 Chrome 自报版本。"""
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon") as key:
+            value, _ = winreg.QueryValueEx(key, "version")
+        value = str(value).strip()
+        return value or None
+    except Exception:
+        return None
+
+
+def _read_last_version() -> str | None:
+    """读 Chrome User Data 的 Last Version 文件(记录最后写盘的版本)。"""
+    candidates = []
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(Path(local_appdata) / "Google" / "Chrome" / "User Data" / "Last Version")
+    home = os.environ.get("USERPROFILE")
+    if home:
+        candidates.append(Path(home) / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "Last Version")
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="ascii", errors="ignore").strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return None
+
+
+def _search_playwright_chromium(root: Path) -> str | None:
+    """在 playwright 缓存里找最高的 chromium-NNNN 目录, 用其版本文件作为代理。"""
+    try:
+        best_revision = -1
+        best_path: Path | None = None
+        for child in root.iterdir():
+            if not child.is_dir() or not child.name.startswith("chromium-"):
+                continue
+            suffix = child.name.removeprefix("chromium-")
+            if not suffix.isdigit():
+                continue
+            revision = int(suffix)
+            if revision > best_revision:
+                best_revision = revision
+                best_path = child
+        if best_path is None:
+            return None
+        for candidate in (
+            best_path / "chrome-win64" / "version.txt",
+            best_path / "version.txt",
+        ):
+            if candidate.is_file():
+                text = candidate.read_text(encoding="ascii", errors="ignore").strip()
+                if text:
+                    return text
+    except Exception:
+        return None
+    return None
+
+
+def _read_playwright_chromium_version() -> str | None:
+    """探测项目内嵌的 playwright chromium 版本(作为未装 Chrome 时的代理)。"""
+    roots = []
+    portable = Path(__file__).resolve().parents[2]
+    roots.append(portable / "runtime" / "playwright")
+    for env_var in ("PLAYWRIGHT_BROWSERS_PATH",):
+        value = os.environ.get(env_var)
+        if value:
+            roots.append(Path(value))
+    home = os.environ.get("USERPROFILE")
+    if home:
+        roots.append(Path(home) / "AppData" / "Local" / "ms-playwright")
+    for root in roots:
+        version = _search_playwright_chromium(root)
+        if version:
+            return version
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _detect_chrome_version() -> str:
+    """按优先级探测 Chrome 完整版本(如 '155.0.8059.85'), 只探测一次。"""
+    for name, probe in (
+        ("BLBeacon", _read_blbeacon_version),
+        ("Last Version", _read_last_version),
+        ("playwright chromium", _read_playwright_chromium_version),
+    ):
+        try:
+            version = probe()
+        except Exception:
+            version = None
+        if version:
+            parts = version.split(".")
+            if len(parts) >= 2 and parts[0].isdigit():
+                logger.info(f"[browser-identity] Chrome 版本来源={name} 版本={version}")
+                return version
+    logger.warning(
+        f"[browser-identity] 无法探测 Chrome 版本, 回退常量 {_FALLBACK_CHROME_VERSION}"
+    )
+    return _FALLBACK_CHROME_VERSION
+
+
+def browser_chrome_version() -> str:
+    """Chrome 完整版本(如 '155.0.8059.85'), 单一版本源。"""
+    return _detect_chrome_version()
+
+
+def browser_chrome_major() -> int:
+    """Chrome 主版本号(如 155)。"""
+    return int(_detect_chrome_version().split(".", 1)[0])
+
+
+def browser_user_agent() -> str:
+    """User-Agent, 只用主版本号(Chrome 的 UA 恒为 major.0.0.0)。"""
+    return _UA_TEMPLATE.format(major=browser_chrome_major())
+
+
+def browser_sec_ch_ua() -> str:
+    """sec-ch-ua 请求头, 品牌顺序已按真实 Chrome 抓包校准。"""
+    major = browser_chrome_major()
+    return (
+        f'"Google Chrome";v="{major}", '
+        f'"Chromium";v="{major}", '
+        f'"Not(A:Brand";v="24"'
+    )
+
+
+def browser_client_hints_metadata() -> Dict[str, Any]:
+    """CDP Emulation.setUserAgentOverride 的 userAgentMetadata 结构。
+
+    brands 里的 fullVersion 用完整版本(UA 里不会出现补丁号, 只出现在这里),
+    与真实 Chrome 的 client hints 行为一致。
+    """
+    version = _detect_chrome_version()
+    major = browser_chrome_major()
+    return {
+        "brands": [
+            {"brand": "Google Chrome", "version": str(major)},
+            {"brand": "Chromium", "version": str(major)},
+            {"brand": "Not(A:Brand", "version": "24"},
+        ],
+        "fullVersion": version,
+        "platform": "Windows",
+        "platformVersion": "10.0.0",
+        "architecture": "x86",
+        "model": "",
+        "mobile": False,
+    }
+
+
+# 统一常量: 所有路径共享同一 locale/时区/屏幕
+BROWSER_ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
+BROWSER_LOCALE = "zh-CN"
+BROWSER_TIMEZONE_ID = "Asia/Shanghai"
+BROWSER_SCREEN = {"width": 1920, "height": 1080}
 
 
 CLOSE_NOTICE_API = "mtop.taobao.idlemessage.pc.profile.notice.update"

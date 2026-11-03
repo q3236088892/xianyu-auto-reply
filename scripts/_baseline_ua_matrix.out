@@ -1,0 +1,94 @@
+==============================================================================
+阶段0 基线: 出站路径 UA / client-hints 矩阵(只读)
+==============================================================================
+
+--- 扫码登录 ---
+  file: backend-web/app/services/qr_login/manager.py
+  硬编码Chrome版本: ['Chrome/120.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36']
+  sec-ch-ua样本: []
+
+--- mtop ---
+  file: common/services/xianyu_mtop.py
+  硬编码Chrome版本: ['Chrome/120.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ']
+  sec-ch-ua样本: []
+
+--- 密码登录 ---
+  file: common/services/xianyu_login/login_do.py
+  硬编码Chrome版本: ['Chrome/146.0.0.0']
+  完整UA条数: 2
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ']
+  sec-ch-ua样本: []
+
+--- 人脸验证 ---
+  file: common/services/xianyu_login/face_verification.py
+  硬编码Chrome版本: ['Chrome/146.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ']
+  sec-ch-ua样本: []
+
+--- IM Token ---
+  file: common/services/im_token_api.py
+  硬编码Chrome版本: ['Chrome/139.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) ']
+  sec-ch-ua样本: []
+
+--- 滑块UA覆写 ---
+  file: common/services/captcha/playwright_touch.py
+  硬编码Chrome版本: ['Chrome/139.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ']
+  sec-ch-ua样本: []
+
+--- 滑块stealth ---
+  file: common/services/captcha/slider_stealth.py
+  硬编码Chrome版本: ['Chrome/138.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) ']
+  sec-ch-ua样本: []
+
+--- Cookie续期浏览器 ---
+  file: common/services/cookie_renew_browser_service.py
+  硬编码Chrome版本: ['Chrome/146.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) ']
+  sec-ch-ua样本: []
+
+--- WebSocket长连 ---
+  file: websocket/app/services/xianyu/xianyu_async.py
+  硬编码Chrome版本: ['Chrome/120.0.0.0']
+  完整UA条数: 3
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36']
+  sec-ch-ua样本: []
+
+--- Cookie刷新 ---
+  file: websocket/app/services/xianyu/cookies_refresh_service.py
+  硬编码Chrome版本: ['Chrome/120.0.0.0']
+  完整UA条数: 1
+  UA样本(前2): ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) ']
+  sec-ch-ua样本: []
+
+==============================================================================
+汇总: 硬编码 Chrome 版本 -> 出现位置
+
+  Chrome/120.0.0.0
+    - backend-web/app/services/qr_login/manager.py
+    - common/services/xianyu_mtop.py
+    - websocket/app/services/xianyu/xianyu_async.py
+    - websocket/app/services/xianyu/cookies_refresh_service.py
+
+  Chrome/138.0.0.0
+    - common/services/captcha/slider_stealth.py
+
+  Chrome/139.0.0.0
+    - common/services/im_token_api.py
+    - common/services/captcha/playwright_touch.py
+
+  Chrome/146.0.0.0
+    - common/services/xianyu_login/login_do.py
+    - common/services/xianyu_login/face_verification.py
+    - common/services/cookie_renew_browser_service.py

@@ -19,7 +19,7 @@ from typing import Dict, Optional
 from loguru import logger
 
 from common.utils.xianyu_utils import (
-    trans_cookies, generate_device_id, generate_mid
+    trans_cookies, generate_device_id, generate_mid, browser_user_agent
 )
 from common.utils.time_utils import get_beijing_now_naive
 from common.utils.text_utils import safe_str
@@ -41,7 +41,7 @@ DEFAULT_HEADERS = {
     'origin': 'https://www.goofish.com',
     'pragma': 'no-cache',
     'referer': 'https://www.goofish.com/',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'user-agent': browser_user_agent()
 }
 
 WEBSOCKET_HEADERS = {}
@@ -583,7 +583,7 @@ class XianyuAsync:
                 "cache-header": "app-key token ua wv",
                 "app-key": "444e9908a51d1cb236a27862abc769c9",
                 "token": self.current_token,
-                "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "ua": browser_user_agent(),
                 "dt": "j",
                 "wv": "im:3,au:3,sy:6",
                 "sync": "0,0;0;0;",
@@ -2151,7 +2151,7 @@ class XianyuAsync:
             
             # 不接受AVIF格式（PIL默认不支持），让CDN返回WEBP/JPEG等格式
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': browser_user_agent(),
                 'Accept': 'image/jpeg,image/png,image/gif,image/webp,*/*;q=0.8',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
                 'Referer': 'https://www.goofish.com/',

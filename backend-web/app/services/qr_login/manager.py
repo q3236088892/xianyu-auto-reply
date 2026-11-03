@@ -22,12 +22,13 @@ import qrcode.constants
 from loguru import logger
 
 from app.services.qr_login.face_verification import run_face_verification
+from common.utils.xianyu_utils import browser_user_agent
 
 
 def generate_headers() -> Dict[str, str]:
     """生成请求头"""
     return {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": browser_user_agent(),
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Accept-Encoding": "gzip, deflate, br",

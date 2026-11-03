@@ -24,6 +24,7 @@ from common.utils.cookie_refresh import (
 )
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path
 from common.services.captcha.concurrency import run_browser_task
+from common.utils.xianyu_utils import browser_user_agent
 
 try:
     from playwright.sync_api import sync_playwright
@@ -55,10 +56,7 @@ class CookiesRefreshService:
     """COOKIES续期浏览器服务。"""
 
     TARGET_URL = "https://www.goofish.com/"
-    USER_AGENT = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
+    USER_AGENT = browser_user_agent()
     BROWSER_ARGS = [
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",

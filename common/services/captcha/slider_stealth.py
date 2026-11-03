@@ -28,10 +28,10 @@ from common.services.captcha.slider_elements import SliderElementFinder
 from common.services.captcha.verification_checker import VerificationChecker
 from common.services.captcha.history_manager import HistoryManager
 from common.services.captcha.playwright_touch import (
-    SLIDER_USER_AGENT,
     configure_slider_user_agent,
     dispatch_touch_drag,
 )
+from common.utils.xianyu_utils import browser_user_agent
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path, is_frozen
 
 try:
@@ -362,19 +362,15 @@ class PlaywrightSliderService:
                 launch_kwargs['timezone_id'] = 'Asia/Shanghai'
                 if not self._cdp_touch_enabled:
                     launch_kwargs['ignore_default_args'] = ['--enable-automation']
-                launch_kwargs['user_agent'] = SLIDER_USER_AGENT
+                launch_kwargs['user_agent'] = browser_user_agent()
                 launch_kwargs['has_touch'] = self._cdp_touch_enabled
                 launch_kwargs['is_mobile'] = False
                 if self.headless:
                     launch_kwargs['screen'] = {'width': 1920, 'height': 1080}
             else:
-                # 密码登录保持原有视口与 UA，避免扩大本次变更范围。
+                # 密码登录分支也统一为单一来源 UA(不再用旧的 138 字面量)
                 launch_kwargs['viewport'] = {'width': 1980, 'height': 1024}
-                launch_kwargs['user_agent'] = (
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                    'AppleWebKit/537.36 (KHTML, like Gecko) '
-                    'Chrome/138.0.0.0 Safari/537.36'
-                )
+                launch_kwargs['user_agent'] = browser_user_agent()
             executable_path = self._find_browser_executable()
             if executable_path:
                 launch_kwargs['executable_path'] = executable_path

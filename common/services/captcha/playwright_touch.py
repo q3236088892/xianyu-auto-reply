@@ -11,17 +11,14 @@ import random
 import time
 from typing import Any, Sequence, Tuple
 
+from common.utils.xianyu_utils import browser_client_hints_metadata, browser_user_agent
 
-SLIDER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
-)
 TouchPoint = Tuple[float, float, float]
 
 
 def configure_slider_user_agent(context: Any, page: Any) -> None:
     """
-    配置与 token 请求一致的 Chrome 139 Windows 指纹。
+    配置与协议请求一致的 Chrome UA / Client Hints(单一来源, 阶段A统一身份)。
 
     Args:
         context: Playwright 浏览器上下文。
@@ -33,29 +30,10 @@ def configure_slider_user_agent(context: Any, page: Any) -> None:
     session.send(
         "Emulation.setUserAgentOverride",
         {
-            "userAgent": SLIDER_USER_AGENT,
+            "userAgent": browser_user_agent(),
             "acceptLanguage": "zh-CN,zh;q=0.9,en;q=0.8",
             "platform": "Win32",
-            "userAgentMetadata": {
-                "brands": [
-                    {"brand": "Not;A=Brand", "version": "99"},
-                    {"brand": "Google Chrome", "version": "139"},
-                    {"brand": "Chromium", "version": "139"},
-                ],
-                "fullVersionList": [
-                    {"brand": "Not;A=Brand", "version": "99.0.0.0"},
-                    {"brand": "Google Chrome", "version": "139.0.0.0"},
-                    {"brand": "Chromium", "version": "139.0.0.0"},
-                ],
-                "fullVersion": "139.0.0.0",
-                "platform": "Windows",
-                "platformVersion": "10.0.0",
-                "architecture": "x86",
-                "model": "",
-                "mobile": False,
-                "bitness": "64",
-                "wow64": False,
-            },
+            "userAgentMetadata": browser_client_hints_metadata(),
         },
     )
 

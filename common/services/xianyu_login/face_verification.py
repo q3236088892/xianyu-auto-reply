@@ -24,16 +24,15 @@ import qrcode
 import qrcode.constants
 from loguru import logger
 
+from common.utils.xianyu_utils import browser_user_agent
+
 # 人脸验证相关接口
 PASSPORT_HOST = "https://passport.goofish.com"
 API_FACE_CHECK = f"{PASSPORT_HOST}/iv/photoVerify/check.do"
 
 # 默认请求头（不含动态风控字段）
 DEFAULT_HEADERS: Dict[str, str] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": browser_user_agent(),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Referer": f"{PASSPORT_HOST}/",

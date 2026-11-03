@@ -14,7 +14,13 @@ from typing import Any
 
 import aiohttp
 
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import (
+    browser_chrome_major,
+    browser_sec_ch_ua,
+    browser_user_agent,
+    generate_sign,
+    trans_cookies,
+)
 
 
 IM_TOKEN_API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.pc.login.token/1.0/"
@@ -114,17 +120,13 @@ async def request_im_token(
         "content-type": "application/x-www-form-urlencoded",
         "pragma": "no-cache",
         "priority": "u=1, i",
-        "sec-ch-ua": '"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"',
+        "sec-ch-ua": browser_sec_ch_ua(),
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/139.0.0.0 Safari/537.36"
-        ),
+        "user-agent": browser_user_agent(),
         "referer": "https://www.goofish.com/",
         "origin": "https://www.goofish.com",
         "cookie": cookies_str.replace("\n", "").replace("\r", "") if cookies_str else "",

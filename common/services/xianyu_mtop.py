@@ -32,7 +32,7 @@ from common.utils.cookie_refresh import (
     trigger_password_login_async,
     update_account_cookies_in_db,
 )
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import browser_user_agent, generate_sign, trans_cookies
 
 # 令牌过期/缺失标志（命中则用 Set-Cookie 刷新 _m_h5_tk 后重试）
 # 注意：闲鱼历史拼写为 EXOIRED，同时兼容标准拼写 EXPIRED 与 EMPTY（首次无令牌）
@@ -171,10 +171,7 @@ async def mtop_call(
             "Content-Type": "application/x-www-form-urlencoded",
             "Origin": "https://www.goofish.com",
             "Referer": "https://www.goofish.com/",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": browser_user_agent(),
             "Cookie": current_cookies,
         }
 

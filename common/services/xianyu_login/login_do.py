@@ -21,28 +21,42 @@ from typing import Any, Dict, Optional
 import httpx
 
 from common.services.xianyu_login.password2 import generate_password2
+from common.utils.xianyu_utils import (
+    browser_chrome_major,
+    browser_chrome_version,
+    browser_user_agent,
+)
 
 # login.do 接口地址（含固定查询参数）
 LOGIN_DO_URL = "https://passport.goofish.com/newlogin/login.do?appName=xianyu&fromSite=77"
 
+
+def _build_login_headers() -> Dict[str, str]:
+    """login.do 请求头, UA / sec-ch-ua 与 client hints 同源(阶段A统一身份)。"""
+    major = browser_chrome_major()
+    full = browser_chrome_version()
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": browser_user_agent(),
+        "sec-ch-ua": (
+            f'"Google Chrome";v="{major}", '
+            f'"Chromium";v="{major}", '
+            f'"Not(A:Brand";v="24"'
+        ),
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "Origin": "https://passport.goofish.com",
+        "Referer": "https://passport.goofish.com/",
+    }
+
+
 # 请求头（照搬登录页真实请求；不含动态 ua/bx-ua）
-LOGIN_HEADERS: Dict[str, str] = {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-    ),
-    "sec-ch-ua": '"Google Chrome";v="146", "Not=A?Brand";v="8", "Chromium";v="146"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Win32"',
-    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
-    "Origin": "https://passport.goofish.com",
-    "Referer": "https://passport.goofish.com/",
-}
+LOGIN_HEADERS: Dict[str, str] = _build_login_headers()
 
 # login.do 固定表单字段（loginId/password2 运行期填充；不含 ua）
 FORM_FIXED: Dict[str, str] = {
