@@ -70,6 +70,8 @@ class QRLoginSession:
         # 人脸验证：二维码渲染后的 base64 PNG data-url 及原始验证 URL
         self.face_qr_url: Optional[str] = None
         self.face_qr_content: Optional[str] = None
+        # 阶段D: 本次登录会话绑定的代理(随 generate 请求传入), 避免进程级单例串号
+        self.proxy: Optional[str] = None
 
     def is_expired(self) -> bool:
         """检查是否过期"""
@@ -100,7 +102,6 @@ class QRLoginManager:
         self.api_scan_status = f"{self.host}/newlogin/qrcode/query.do"
         self.api_face_check = f"{self.host}/iv/photoVerify/check.do"
         self.api_h5_tk = "https://h5api.m.goofish.com/h5/mtop.gaia.nodejs.gaia.idle.data.gw.v2.index.get/1.0/"
-        self.proxy: Optional[str] = None
         self.timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=60.0)
 
     def _cookie_marshal(self, cookies: Dict[str, str]) -> str:
@@ -115,7 +116,7 @@ class QRLoginManager:
         app_key = "34839810"
 
         async with httpx.AsyncClient(
-            timeout=self.timeout, follow_redirects=True, proxy=self.proxy
+            timeout=self.timeout, follow_redirects=True, proxy=session.proxy, trust_env=False
         ) as client:
             try:
                 resp = await client.get(self.api_h5_tk, headers=self.headers)
@@ -175,7 +176,7 @@ class QRLoginManager:
         }
 
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=self.timeout, proxy=self.proxy
+            follow_redirects=True, timeout=self.timeout, proxy=session.proxy, trust_env=False
         ) as client:
             try:
                 resp = await client.get(
@@ -222,7 +223,7 @@ class QRLoginManager:
             logger.info(f"获取登录参数成功: {session_id}")
 
             async with httpx.AsyncClient(
-                follow_redirects=True, timeout=self.timeout, proxy=self.proxy
+                follow_redirects=True, timeout=self.timeout, proxy=session.proxy, trust_env=False
             ) as client:
                 resp = await client.get(
                     self.api_generate_qr, params=session.params, headers=self.headers
@@ -291,7 +292,7 @@ class QRLoginManager:
     async def _poll_qrcode_status(self, session: QRLoginSession) -> httpx.Response:
         """获取二维码扫描状态"""
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=self.timeout, proxy=self.proxy
+            follow_redirects=True, timeout=self.timeout, proxy=session.proxy, trust_env=False
         ) as client:
             resp = await client.post(
                 self.api_scan_status,

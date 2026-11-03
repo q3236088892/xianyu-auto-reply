@@ -207,8 +207,13 @@ def _fail_protocol_login(
 async def run_protocol_login(
     *, session: Dict[str, Any], account_id: str, account: str, password: str,
     show_browser: bool, owner_id: int,
+    proxy_url: Optional[str] = None,
 ) -> None:
-    """协议化密码登录主编排（在后台任务中运行，直接更新传入的 session 字典）。"""
+    """协议化密码登录主编排（在后台任务中运行，直接更新传入的 session 字典）。
+
+    proxy_url: 阶段D会话级代理(httpx socks5h:// 或 http(s):// URL)。账号行可能尚未
+    创建(与扫码登录同理), 由前端在发起密码登录时随请求传入, 绑定到本次登录会话。
+    """
     start = time.time()
     remote_config = await _read_remote_config()
 
@@ -217,7 +222,8 @@ async def run_protocol_login(
 
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0), follow_redirects=False
+            timeout=httpx.Timeout(30.0), follow_redirects=False,
+            proxy=proxy_url or None, trust_env=False,
         ) as client:
             slider_rounds = 0
             pending_login_cookies: Optional[Dict[str, str]] = None

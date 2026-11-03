@@ -21,6 +21,7 @@ from loguru import logger
 from common.utils.xianyu_utils import (
     trans_cookies, generate_device_id, generate_mid, browser_user_agent
 )
+from common.services.proxy_factory import ProxyConfigError
 from common.utils.time_utils import get_beijing_now_naive
 from common.utils.text_utils import safe_str
 from app.services.xianyu.connection_manager import ConnectionManager, ConnectionState
@@ -282,7 +283,9 @@ class XianyuAsync:
 
             async with async_session_maker() as session:
                 stmt = select(SystemSetting.key, SystemSetting.value).where(
-                    SystemSetting.key.in_(['proxy.api_url', 'proxy.enabled'])
+                    SystemSetting.key.in_(
+                        ['proxy.api_url', 'proxy.enabled', 'proxy.fail_closed']
+                    )
                 )
                 result = await session.execute(stmt)
                 rows = {key: value for key, value in result.all()}
@@ -290,6 +293,10 @@ class XianyuAsync:
             return {
                 'api_url': str(rows.get('proxy.api_url') or '').strip(),
                 'enabled': str(rows.get('proxy.enabled') or 'false').strip().lower()
+                in ('true', '1', 'yes', 'on'),
+                # 阶段D fail-closed 开关: 代理已配置但不可用时, true=停连告警, false=兼容旧行为(直连)
+                # 默认 true(fail-closed)。老账号 proxy_type='none' 不受影响(无代理=直连)。
+                'fail_closed': str(rows.get('proxy.fail_closed') or 'true').strip().lower()
                 in ('true', '1', 'yes', 'on'),
             }
         except Exception as e:
@@ -2478,7 +2485,12 @@ class XianyuAsync:
                     #   （场景：账号级 SOCKS5 代理批量失效时，无需逐个修改账号配置即可切回直连）
                     # - 开启时：账号级代理正常生效；账号未配置代理时使用系统代理 API
                     # - DB 读取失败 (None)：保留账号级代理，避免偶发故障导致全量代理被错误关闭
+                    # - fail_closed(阶段D R1.7): 代理已配置但不可用时停连告警, 禁止降级直连
                     system_proxy_settings = await self._load_system_proxy_settings()
+                    _fail_closed = (
+                        system_proxy_settings.get('fail_closed', True)
+                        if system_proxy_settings is not None else True
+                    )
                     if (
                         system_proxy_settings is not None
                         and not system_proxy_settings.get('enabled', False)
@@ -2487,6 +2499,15 @@ class XianyuAsync:
                         original_type = self.proxy_config.get('proxy_type')
                         original_host = self.proxy_config.get('proxy_host')
                         original_port = self.proxy_config.get('proxy_port')
+                        if _fail_closed:
+                            logger.error(
+                                f"【{self.cookie_id}】fail-closed: 系统代理总开关已关闭, 但账号已配置代理"
+                                f"（{original_type}://{original_host}:{original_port}）,"
+                                f" 拒绝降级直连, 停止连接"
+                            )
+                            raise ProxyConfigError(
+                                f"账号 {self.cookie_id} 已配置代理但系统总开关关闭(fail-closed)"
+                            )
                         logger.info(
                             f"【{self.cookie_id}】系统代理总开关已关闭，账号级代理"
                             f"（{original_type}://{original_host}:{original_port}）"
@@ -2720,6 +2741,15 @@ class XianyuAsync:
                                 self.connection_manager.ws = None
                                 logger.info(f"【{self.cookie_id}】WebSocket连接已退出")
                 
+                except ProxyConfigError as pce:
+                    # 阶段D R1.7 fail-closed: 代理配置错误(已配置但不可用), 停连+告警,
+                    # 禁止重试(重试只会反复命中同一配置错误), 必须人工修复配置后重启连接。
+                    logger.error(f"【{self.cookie_id}】fail-closed 代理配置错误, 停止连接: {pce}")
+                    self.connection_manager.set_connection_state(
+                        ConnectionState.DISCONNECTED,
+                        f"代理配置错误(fail-closed): {pce}",
+                    )
+                    break
                 except Exception as e:
                     error_msg = str(e)
                     error_type = type(e).__name__
