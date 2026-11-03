@@ -66,56 +66,21 @@ URL_EXPIRED = "__URL_EXPIRED__"
 class PlaywrightSliderService:
     """Playwright滑块验证服务"""
 
-    # 浏览器启动参数
+    # 浏览器启动参数（密码登录分支，阶段B收缩）
+    # 原则：去掉 JS 可观测的降级项，保留功能承重参数。
+    #   保留 --no-zygote：_kill_browser_processes 依赖子进程命令行携带
+    #   --user-data-dir 精确强杀（见 :1352+），去掉会导致残留进程无法清理。
+    #   保留 --no-sandbox：Docker/无显示环境必需。
+    #   保留 --disable-blink-features=AutomationControlled：反自动化检测。
+    # 不改动 SLIDER_BROWSER_ARGS（Token 滑块已调优路径）。
     BROWSER_ARGS = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
         "--no-zygote",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
-        "--start-maximized",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-extensions",
-        "--disable-plugins",
-        "--disable-default-apps",
-        "--disable-sync",
-        "--disable-translate",
-        "--hide-scrollbars",
-        "--mute-audio",
+        "--no-first-run",
         "--no-default-browser-check",
-        "--disable-logging",
-        "--disable-permissions-api",
-        "--disable-notifications",
-        "--disable-popup-blocking",
-        "--disable-prompt-on-repost",
-        "--disable-hang-monitor",
-        "--disable-client-side-phishing-detection",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-background-mode",
-        "--disable-domain-reliability",
-        "--disable-features=TranslateUI",
-        "--disable-ipc-flooding-protection",
-        "--disable-field-trial-config",
-        "--disable-background-networking",
-        "--disable-back-forward-cache",
-        "--disable-breakpad",
-        "--disable-component-update",
-        "--force-color-profile=srgb",
-        "--metrics-recording-only",
-        "--password-store=basic",
-        "--use-mock-keychain",
-        "--no-service-autorun",
-        "--export-tagged-pdf",
-        "--disable-search-engine-choice-screen",
-        "--unsafely-disable-devtools-self-xss-warnings",
-        "--allow-pre-commit-input"
+        "--disable-blink-features=AutomationControlled",
     ]
 
     # Token 滑块专用参数：参考真人模式保留 Chromium 原生能力，避免大量禁用项形成

@@ -112,18 +112,15 @@ class CookieRenewBrowserService:
             ...
     """
 
-    # 浏览器启动参数
+    # 浏览器启动参数（阶段B收缩）
+    # 去掉 JS 可观测的降级项（--disable-gpu 致 WebGL SwiftShader 化、
+    # --disable-web-security 可被 CORS 探测、--disable-extensions 等）。
+    # 该服务仅做 DOM 操作与 Cookie 读写，无跨域 fetch 依赖，已确认安全。
     BROWSER_ARGS = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-web-security",
         "--disable-blink-features=AutomationControlled",
-        "--disable-extensions",
-        "--disable-plugins",
-        "--disable-notifications",
-        "--disable-popup-blocking",
         "--lang=zh-CN",
     ]
 
@@ -422,14 +419,22 @@ class CookieRenewBrowserService:
             launch_kwargs: dict[str, Any] = {
                 "headless": False,
                 "args": self.BROWSER_ARGS,
-                "viewport": {"width": 1280, "height": 720},
                 "user_agent": browser_user_agent(),
                 "locale": "zh-CN",
                 "timezone_id": "Asia/Shanghai",
             }
-            # Docker环境下强制无头模式（容器内无显示器）
+            # 有头模式用真实窗口尺寸（no_viewport + --window-size），避免 viewport 与
+            # outerWidth/screen 指纹冲突；无头模式给固定视口，对齐 slider_stealth 做法。
             if os.environ.get("BROWSER_HEADLESS", "").lower() == "true":
                 launch_kwargs["headless"] = True
+                launch_kwargs["viewport"] = {"width": 1920, "height": 1080}
+                launch_kwargs["screen"] = {"width": 1920, "height": 1080}
+            else:
+                launch_kwargs["no_viewport"] = True
+                launch_kwargs["args"] = [
+                    *self.BROWSER_ARGS,
+                    "--window-size=1920,1080",
+                ]
 
             chromium_path = get_chromium_executable_path()
             if chromium_path:

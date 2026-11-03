@@ -151,7 +151,7 @@ _BROWSER_ARGS = [
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-popup-blocking",
-    "--force-color-profile=srgb",
+    # 阶段B: 移除 --force-color-profile=srgb（JS 可读回颜色配置，形成自动化指纹）
     "--lang=zh-CN",
     "--start-maximized",       # 窗口默认最大化（配合 no_viewport 生效）
 ]
