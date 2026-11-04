@@ -14,14 +14,26 @@ from pathlib import Path
 # 项目根目录 (backend-web/)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# 静态文件根目录 - 优先使用环境变量 STATIC_DIR（Docker共享卷），本地回退到 backend-web/static
-_static_dir_env = os.environ.get("STATIC_DIR", "")
-if _static_dir_env:
-    STATIC_ROOT = Path(_static_dir_env)
-    if not STATIC_ROOT.is_absolute():
-        STATIC_ROOT = Path.cwd() / STATIC_ROOT
-else:
-    STATIC_ROOT = PROJECT_ROOT / "static"
+# 静态文件根目录 - 与 _bootstrap.py 的挂载点(settings.static_dir)同源:
+# 显式 STATIC_DIR > 默认 "static"(相对进程cwd解析, run_release 下 cwd=app/)。
+# 历史上这里回退到 backend-web/static, 与挂载的 app/static 劈叉,
+# 导致"上传成功但预览裂图"; portable 部署器已注入持久 STATIC_DIR 根治。
+def _resolve_static_root() -> Path:
+    env_dir = os.environ.get("STATIC_DIR", "").strip()
+    if env_dir:
+        p = Path(env_dir)
+        return p if p.is_absolute() else (Path.cwd() / p).resolve()
+    try:
+        from app.core.config import get_settings
+        cfg_dir = str(get_settings().static_dir or "static")
+        p = Path(cfg_dir)
+        # 与 _bootstrap 一致: StaticFiles 对相对路径按进程cwd解析
+        return p if p.is_absolute() else (Path.cwd() / p).resolve()
+    except Exception:
+        return (Path.cwd() / "static").resolve()
+
+
+STATIC_ROOT = _resolve_static_root()
 
 # 上传文件目录 - 统一使用 static/uploads/
 UPLOADS_ROOT = STATIC_ROOT / "uploads"
