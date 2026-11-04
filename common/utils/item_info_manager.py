@@ -3,6 +3,7 @@
 
 提供商品信息的获取、保存等功能（不依赖 WebSocket）
 """
+from common.utils.xianyu_utils import browser_user_agent
 import asyncio
 import json
 import time
@@ -154,7 +155,7 @@ class ItemInfoManager:
             headers = {
                 'Cookie': self.cookies_str,
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': browser_user_agent(),
                 'Referer': 'https://www.goofish.com/',
                 'Origin': 'https://www.goofish.com'
             }

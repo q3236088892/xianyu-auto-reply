@@ -17,7 +17,7 @@ from typing import Any, Dict
 import aiohttp
 from loguru import logger
 
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import generate_sign, trans_cookies, browser_user_agent
 
 
 # 卖家数据概览API配置
@@ -100,9 +100,7 @@ async def fetch_seller_summary(
         "idle_site_biz_code": "COMMONPRO",
         "idle_user_group_member_id": "",
         "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/146.0.0.0 Safari/537.36"
+            browser_user_agent()
         ),
     }
 
@@ -232,9 +230,7 @@ async def fetch_browse_summary(
         "idle_site_biz_code": "COMMONPRO",
         "idle_user_group_member_id": "",
         "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/146.0.0.0 Safari/537.36"
+            browser_user_agent()
         ),
     }
 

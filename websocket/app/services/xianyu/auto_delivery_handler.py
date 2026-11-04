@@ -9,6 +9,7 @@
 - 亦凡API委托给YifanApiHandler处理
 """
 
+from common.utils.xianyu_utils import browser_user_agent
 import asyncio
 import json
 import os
@@ -727,7 +728,7 @@ class AutoDeliveryHandler:
                 'content-type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.goofish.com',
                 'referer': 'https://www.goofish.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+                'user-agent': browser_user_agent(),
                 'cookie': self.cookies_str.replace('\n', '').replace('\r', '') if self.cookies_str else '',
             }
             
@@ -2907,7 +2908,7 @@ class AutoDeliveryHandler:
                 'pragma': 'no-cache',
                 'origin': 'https://www.goofish.com',
                 'referer': 'https://www.goofish.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+                'user-agent': browser_user_agent(),
                 'cookie': self.cookies_str.replace('\n', '').replace('\r', '') if self.cookies_str else '',
             }
 
@@ -3264,7 +3265,7 @@ class AutoDeliveryHandler:
                 'pragma': 'no-cache',
                 'origin': 'https://seller.goofish.com',
                 'referer': 'https://seller.goofish.com/?site=COMMONPRO&spm=a21107h.44911108.0.0',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+                'user-agent': browser_user_agent(),
                 'cookie': self.cookies_str.replace('\n', '').replace('\r', '') if self.cookies_str else '',
             }
 

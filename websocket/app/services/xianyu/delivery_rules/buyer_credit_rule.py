@@ -6,6 +6,7 @@
 2. 评价数 <= 阈值（默认0）时命中拦截
 """
 from __future__ import annotations
+from common.utils.xianyu_utils import browser_user_agent
 
 import asyncio
 import json
@@ -154,10 +155,7 @@ class BuyerCreditRule(BaseDeliveryRule):
                 "pragma": "no-cache",
                 "origin": "https://www.goofish.com",
                 "referer": "https://www.goofish.com/",
-                "user-agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
-                ),
+                "user-agent": browser_user_agent(),
                 "cookie": cookies_str.replace("\n", "").replace("\r", ""),
             }
 

@@ -351,16 +351,16 @@ async def close_account_notice(account_id: str, cookies_str: str, task_name: str
         "content-type": "application/x-www-form-urlencoded",
         "cookie": cookies_str,
         "Referer": "https://www.goofish.com/",
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
-        ),
+        "user-agent": browser_user_agent(),
     }
 
     url = f"https://h5api.m.goofish.com/h5/{CLOSE_NOTICE_API}/1.0/"
 
     try:
-        async with aiohttp.ClientSession() as http_session:
+        from common.services.proxy_factory import proxy_connector_for_account
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"关闭通知账号 {account_id}"),
+        ) as http_session:
             async with http_session.post(
                 url,
                 params=params,

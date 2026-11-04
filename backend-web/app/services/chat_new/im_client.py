@@ -33,6 +33,7 @@ from common.services.token_renewal_cache_service import (
 )
 from common.utils.time_utils import get_beijing_now_naive
 from common.utils.xianyu_utils import (
+    browser_chrome_major,
     generate_device_id,
     generate_mid,
     generate_sign,
@@ -132,9 +133,7 @@ class GoofishImClient:
                 "Pragma": "no-cache",
                 "Cache-Control": "no-cache",
                 "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/146.0.0.0 Safari/537.36"
+                    browser_user_agent()
                 ),
                 "Origin": "https://www.goofish.com",
                 "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -665,9 +664,7 @@ class GoofishImClient:
                 "referer": "https://www.goofish.com/",
                 "origin": "https://www.goofish.com",
                 "user-agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/146.0.0.0 Safari/537.36"
+                    browser_user_agent()
                 ),
             }
 
@@ -865,12 +862,10 @@ class GoofishImClient:
                 "app-key": "444e9908a51d1cb236a27862abc769c9",
                 "token": self.token,
                 "ua": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/146.0.0.0 Safari/537.36 "
-                    "DingTalk(2.1.5) OS(Windows/10) "
-                    "Browser(Chrome/146.0.0.0) DingWeb/2.1.5 "
-                    "IMPaaS DingWeb/2.1.5"
+                    browser_user_agent()
+                    + f" DingTalk(2.1.5) OS(Windows/10) "
+                    + f"Browser(Chrome/{browser_chrome_major()}.0.0.0) DingWeb/2.1.5 "
+                    + "IMPaaS DingWeb/2.1.5"
                 ),
                 "dt": "j",
                 "wv": "im:3,au:3,sy:6",

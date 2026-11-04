@@ -1,7 +1,7 @@
 """阶段A 验证脚本: 单一来源访问器的正确性自检。
 只读, 不启动服务, 直接调用 common.utils.xianyu_utils 的访问器断言。
 """
-from common.utils.xianyu_utils import (
+from common.utils.xianyu_utils import (, browser_user_agent, browser_sec_ch_ua
     BROWSER_ACCEPT_LANGUAGE,
     BROWSER_LOCALE,
     BROWSER_SCREEN,

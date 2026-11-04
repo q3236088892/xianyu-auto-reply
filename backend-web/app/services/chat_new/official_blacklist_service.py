@@ -7,7 +7,7 @@ from typing import Any
 
 import aiohttp
 
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import generate_sign, trans_cookies, browser_user_agent
 
 
 API_VERSIONS = {
@@ -42,7 +42,7 @@ async def official_blacklist_request(cookies_str: str, session_id: str, action: 
         "cookie": cookies_str.replace("\n", "").replace("\r", ""),
         "origin": "https://www.goofish.com",
         "referer": "https://www.goofish.com/",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/146.0.0.0 Safari/537.36",
+        "user-agent": browser_user_agent(),
     }
     url = f"https://h5api.m.goofish.com/h5/{api}/{version}/"
     from common.services.proxy_factory import proxy_connector_for_account

@@ -11,6 +11,7 @@
 此服务位于common目录下，供backend-web和websocket服务共同使用
 """
 from __future__ import annotations
+from common.utils.xianyu_utils import browser_user_agent
 
 import asyncio
 from typing import Optional, Dict
@@ -1042,7 +1043,7 @@ class OrderService:
             'idle_site_biz_code': 'COMMONPRO',
             'cookie': cookies_str,
             'Referer': 'https://seller.goofish.com/',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+            'user-agent': browser_user_agent(),
         }
         
         from common.services.proxy_factory import proxy_connector_for_account
@@ -1385,7 +1386,7 @@ class OrderService:
             'idle_site_biz_code': 'COMMONPRO',
             'cookie': cookies_str,
             'Referer': 'https://seller.goofish.com/?site=COMMONPRO',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+            'user-agent': browser_user_agent(),
         }
 
         from common.services.proxy_factory import proxy_connector_for_account
@@ -1772,7 +1773,7 @@ class OrderDetailService:
                 'content-type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.goofish.com',
                 'referer': 'https://www.goofish.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+                'user-agent': browser_user_agent(),
                 'cookie': self.cookies_str,
             }
             
@@ -2185,7 +2186,7 @@ class OrderStatusChecker:
                 'content-type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.goofish.com',
                 'referer': 'https://www.goofish.com/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+                'user-agent': browser_user_agent(),
                 'cookie': self.cookies_str,
             }
             

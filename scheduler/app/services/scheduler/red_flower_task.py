@@ -30,7 +30,7 @@ from common.models.scheduled_red_flower_log import ScheduledRedFlowerLog
 from common.models.xy_account import XYAccount
 from common.models.xy_order import XYOrder
 from common.utils.time_utils import get_beijing_now_naive
-from common.utils.xianyu_utils import trans_cookies, generate_sign
+from common.utils.xianyu_utils import trans_cookies, generate_sign, browser_user_agent
 from common.utils.cookie_refresh import (
     is_token_expired_error, handle_token_expired_response,
     update_account_cookies_in_db,
@@ -371,11 +371,7 @@ class RedFlowerTask:
                 "content-type": "application/x-www-form-urlencoded",
                 "cookie": cookie_str,
                 "Referer": "https://www.goofish.com/",
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
+                "User-Agent": browser_user_agent(),
             }
 
             retry_tag = "[令牌过期重试] " if is_retry else ""

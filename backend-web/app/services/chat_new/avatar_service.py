@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.redis_client import get_redis_client
 from common.models.xy_account import XYAccount
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import generate_sign, trans_cookies, browser_user_agent, browser_sec_ch_ua
 
 # Redis缓存键前缀
 AVATAR_CACHE_PREFIX = "chat:avatar:"
@@ -175,16 +175,14 @@ async def _fetch_user_info_from_api(
             "content-type": "application/x-www-form-urlencoded",
             "pragma": "no-cache",
             "priority": "u=1, i",
-            "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+            "sec-ch-ua": browser_sec_ch_ua(),
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-site",
             "user-agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/146.0.0.0 Safari/537.36"
+                browser_user_agent()
             ),
             "referer": "https://www.goofish.com/",
             "cookie": cookies_str.replace("\n", "").replace("\r", ""),

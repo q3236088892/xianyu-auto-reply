@@ -77,8 +77,7 @@ FORM_FIXED: Dict[str, str] = {
     "screenPixel": "1920x1080",
     "navlanguage": "zh-CN",
     "navUserAgent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+        browser_user_agent()
     ),
     "navPlatform": "Win32",
     "umidGetStatusVal": "255",

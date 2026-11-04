@@ -26,7 +26,7 @@ from common.utils.cookie_refresh import (
     trigger_password_login_async,
     update_account_cookies_in_db,
 )
-from common.utils.xianyu_utils import generate_sign, trans_cookies
+from common.utils.xianyu_utils import generate_sign, trans_cookies, browser_user_agent
 
 
 DELETE_ITEM_API = "mtop.alibaba.idle.seller.pc.item.delete"
@@ -152,9 +152,7 @@ async def _delete_item_with_session(
                 "sec-fetch-mode": "cors",
                 "sec-fetch-site": "same-site",
                 "user-agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/146.0.0.0 Safari/537.36"
+                    browser_user_agent()
                 ),
                 "referer": "https://seller.goofish.com/?site=COMMONPRO",
                 "cookie": current_cookies.replace("\n", "").replace("\r", ""),

@@ -2311,7 +2311,10 @@ class XianyuAsync:
                 'Referer': 'https://www.goofish.com/',
             }
             
-            async with aiohttp.ClientSession() as session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(self.cookie_id, context=f"图片尺寸获取账号 {self.cookie_id}"),
+            ) as session:
                 async with session.get(image_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 200:
                         image_data = await response.read()

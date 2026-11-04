@@ -28,7 +28,7 @@ from common.db.session import async_session_maker
 from common.models.scheduled_login_renew_log import ScheduledLoginRenewLog
 from common.models.xy_account import XYAccount
 from common.utils.cookie_refresh import clear_cookie_refresh_snapshot
-from common.utils.xianyu_utils import trans_cookies, generate_sign
+from common.utils.xianyu_utils import trans_cookies, generate_sign, browser_user_agent
 from common.utils.time_utils import get_beijing_now_naive
 
 
@@ -271,7 +271,7 @@ class LoginRenewTaskService:
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-site',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+            'user-agent': browser_user_agent(),
             'cookie': cookies_str.replace('\n', '').replace('\r', '') if cookies_str else '',
         }
         

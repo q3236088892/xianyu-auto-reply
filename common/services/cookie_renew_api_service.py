@@ -25,7 +25,7 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
-from common.utils.xianyu_utils import trans_cookies
+from common.utils.xianyu_utils import trans_cookies, browser_user_agent, browser_sec_ch_ua
 
 
 # hasLogin.do 接口地址（登录态确认续期，返回 sgcookie/tracknick/csg/unb 等）
@@ -439,13 +439,12 @@ class CookieRenewApiService:
                 "accept": "application/json, text/plain, */*",
                 "accept-language": "zh-CN",
                 "content-type": "application/x-www-form-urlencoded",
-                "sec-ch-ua": '"Chromium";v="145", "Not:A-Brand";v="99"',
+                "sec-ch-ua": browser_sec_ch_ua(),
                 "sec-ch-ua-mobile": "?0",
                 "sec-ch-ua-platform": '"Windows"',
                 "bx-v": "2.5.31",
                 "user-agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+                    browser_user_agent()
                 ),
                 "referer": f"https://passport.goofish.com/mini_login.htm?lang=zh_cn&appName=xianyu&appEntrance=web&styleType=vertical&bizParams=&notLoadSsoView=false&notKeepLogin=false&isMobile=false&qrCodeFirst=false&stie=77&rnd={rnd_value}",
                 "cookie": cookies_str.replace("\n", "").replace("\r", ""),
@@ -564,7 +563,7 @@ class CookieRenewApiService:
             "cache-control": "no-cache",
             "pragma": "no-cache",
             "priority": "u=1, i",
-            "sec-ch-ua": '"Google Chrome";v="146", "Not=A?Brand";v="8", "Not/A)Brand";v="146"',
+            "sec-ch-ua": browser_sec_ch_ua(),
             "sec-ch-ua-arch": '"x86"',
             "sec-ch-ua-bitness": '"64"',
             "sec-ch-ua-mobile": "?0",
@@ -687,7 +686,7 @@ class CookieRenewApiService:
             "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
             "content-type": "application/x-www-form-urlencoded",
             "referer": "https://www.goofish.com/",
-            "sec-ch-ua": '"Google Chrome";v="146", "Not=A?Brand";v="8"',
+            "sec-ch-ua": browser_sec_ch_ua(),
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
             "sec-fetch-dest": "empty",

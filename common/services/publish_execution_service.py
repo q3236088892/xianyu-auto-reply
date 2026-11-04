@@ -173,6 +173,11 @@ async def execute_single_publish(
             logger.error(f"更新认证等待状态失败: {notify_exc}")
 
     proxy = _build_account_proxy(account, account_id)
+    # 阶段C指纹一致性：发布浏览器视口/locale/时区与滑块登录浏览器同一档案
+    browser_features = None
+    if account is not None:
+        from common.services.captcha.browser_features import get_account_browser_features
+        browser_features = get_account_browser_features(account.account_id)
     relay = None
     if proxy and proxy.get("username") and proxy.get("server", "").startswith("socks5://"):
         # Chromium 不支持带认证的 SOCKS5：起本地免密中继转发到带认证上游
@@ -188,6 +193,7 @@ async def execute_single_publish(
             static_root=static_root,
             on_auth_wait=_notify_auth_wait,
             proxy=proxy,
+            browser_features=browser_features,
         )
     except Exception as exc:
         pub_error = exc

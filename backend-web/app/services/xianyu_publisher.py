@@ -10,6 +10,7 @@
 迁移自旧项目 utils/xianyu_publisher.py，适配新框架异步架构
 """
 from __future__ import annotations
+from common.utils.xianyu_utils import browser_user_agent
 
 import asyncio
 import base64
@@ -77,7 +78,8 @@ class XianyuPublisher:
         self.temp_image_paths = []
 
     async def initialize(self, headless: bool = True, force_reinit: bool = False,
-                         proxy: Optional[dict] = None):
+                         proxy: Optional[dict] = None,
+                         browser_features: Optional[dict] = None):
         """初始化浏览器（增强反检测）
 
         Args:
@@ -85,6 +87,8 @@ class XianyuPublisher:
             force_reinit: 是否强制重新初始化（即使已经初始化）
             proxy: Playwright launch 的 proxy dict（如 {"server": "socks5://host:port"}），
                    None 表示直连。账号已配置代理时上层必须传入，防止登录IP与行为IP不一致。
+            browser_features: 账号指纹档案（get_account_browser_features 产物，可空）。
+                   传入后视口/locale/时区与滑块登录浏览器一致（阶段C指纹一致性）。
         """
         if self.is_initialized and not force_reinit:
             logger.info("✅ 浏览器已初始化，复用现有实例")
@@ -98,6 +102,13 @@ class XianyuPublisher:
         if self.is_initialized and force_reinit:
             await self.close_only_browser()
 
+        # 指纹档案维度（缺省与档案默认值一致）
+        features = browser_features or {}
+        viewport_w = int(features.get("viewport_width") or 1920)
+        viewport_h = int(features.get("viewport_height") or 1080)
+        locale = features.get("locale") or "zh-CN"
+        timezone_id = features.get("timezone_id") or "Asia/Shanghai"
+
         ensure_playwright_browser_path()
         self.playwright = await async_playwright().start()
 
@@ -108,7 +119,7 @@ class XianyuPublisher:
             "--disable-setuid-sandbox",
             "--disable-web-security",
             "--disable-features=IsolateOrigins,site-per-process",
-            "--window-size=1920,1080",
+            f"--window-size={viewport_w},{viewport_h}",
             "--start-maximized",
         ]
         # 封堵 WebRTC 暴露本机网卡 IP（与 slider_stealth/real_mouse 启动点保持一致）
@@ -131,15 +142,12 @@ class XianyuPublisher:
         self.browser = await self.playwright.chromium.launch(**launch_kwargs)
 
         self.context = await self.browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
+            viewport={"width": viewport_w, "height": viewport_h},
+            user_agent=browser_user_agent(),
             permissions=["geolocation", "notifications"],
             java_script_enabled=True,
-            locale="zh-CN",
-            timezone_id="Asia/Shanghai",
+            locale=locale,
+            timezone_id=timezone_id,
         )
 
         self.page = await self.context.new_page()
@@ -208,12 +216,14 @@ class XianyuPublisher:
         should_close: bool = True,
         on_auth_wait: Optional[Callable[[str], Awaitable[None]]] = None,
         proxy: Optional[dict] = None,
+        browser_features: Optional[dict] = None,
     ) -> dict:
         """发布商品到闲鱼（按原项目完整流程迁回）
 
         on_auth_wait: 可选异步回调，检测到发布风控认证弹窗时以二维码URL调用之。
         proxy: Playwright launch 的 proxy dict；仅在新建浏览器时生效（复用已有浏览器时
                代理已于初始化时绑定）。
+        browser_features: 账号指纹档案（可空），传给 initialize 保证与登录浏览器一致。
         """
         result = {
             "success": False,
@@ -238,7 +248,7 @@ class XianyuPublisher:
                 logger.info("🔄 复用现有浏览器，重新创建页面...")
                 await self.reinitialize_page()
             else:
-                await self.initialize(headless=headless, proxy=proxy)
+                await self.initialize(headless=headless, proxy=proxy, browser_features=browser_features)
 
             if not (reuse_browser and self.is_initialized and self.current_cookie == cookie_data["cookie"]):
                 await self.set_cookies(cookie_data["cookie"])

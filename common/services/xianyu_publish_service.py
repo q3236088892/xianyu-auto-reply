@@ -34,6 +34,7 @@ async def publish_single_item(
     static_root: str | Path | None = None,
     on_auth_wait: Callable[[str], Awaitable[None]] | None = None,
     proxy: dict | None = None,
+    browser_features: dict | None = None,
 ) -> dict:
     """使用共享发布器执行一次单品发布。
 
@@ -49,4 +50,5 @@ async def publish_single_item(
         should_close=True,
         on_auth_wait=on_auth_wait,
         proxy=proxy,
+        browser_features=browser_features,
     )

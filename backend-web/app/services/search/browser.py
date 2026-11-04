@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from common.utils.xianyu_utils import browser_user_agent
 import asyncio
 import os
 import sys
@@ -108,7 +109,7 @@ class BrowserManager:
             launch_kwargs = dict(
                 headless=headless,
                 args=browser_args,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                user_agent=browser_user_agent(),
                 viewport={'width': 1280, 'height': 720},
                 locale='zh-CN',
             )
