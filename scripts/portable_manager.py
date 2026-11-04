@@ -1132,14 +1132,38 @@ def write_service_env_files(
         f"BACKUP_DIR={backup_dir}",
     ]
 
+    promotion_env = [
+        "ENVIRONMENT=production",
+        "LOG_LEVEL=INFO",
+        "HOST=127.0.0.1",
+        f"MYSQL_HOST={_quote_env_value(mysql['host'])}",
+        f"MYSQL_PORT={_quote_env_value(mysql['port'])}",
+        f"MYSQL_USER={_quote_env_value(mysql['user'])}",
+        f"MYSQL_PASSWORD={_quote_env_value(mysql['password'])}",
+        f"MYSQL_DATABASE={_quote_env_value(mysql['database'])}",
+        f"REDIS_HOST={_quote_env_value(redis['host'])}",
+        f"REDIS_PORT={_quote_env_value(redis['port'])}",
+        f"REDIS_PASSWORD={_quote_env_value(redis['password'])}",
+        f"REDIS_DB={_quote_env_value(redis['db'])}",
+        f"PROMOTION_PORT={ports['promotion']}",
+        f"BACKEND_WEB_SERVICE_URL=http://127.0.0.1:{ports['backend-web']}",
+        f"STATIC_DIR={backend_static_dir}",
+        f"BACKUP_DIR={backup_dir}",
+    ]
+
+    # 关键修复:服务运行时 cwd = source(app 根), 而 BaseConfig 用相对路径 env_file=".env",
+    # pydantic 从 cwd 解析。因此 .env 必须写到 <app>/<service_dir>/.env 而非仓库根的
+    # <base>/<service_dir>/.env, 否则服务读不到、回退到默认库 xianyu_data。
     files = {
         "backend-web": base / "backend-web" / ".env",
         "websocket": base / "websocket" / ".env",
         "scheduler": base / "scheduler" / ".env",
+        "promotion": base / "promotion" / "backend" / ".env",
     }
     _write_env_file(files["backend-web"], backend_env)
     _write_env_file(files["websocket"], websocket_env)
     _write_env_file(files["scheduler"], scheduler_env)
+    _write_env_file(files["promotion"], promotion_env)
     return files
 
 
@@ -1270,6 +1294,25 @@ def _launch_python_service(
     env["PYTHONIOENCODING"] = "utf-8"
     env["HOST"] = "127.0.0.1"
     env[f"{service.name.replace('-', '_').upper()}_PORT"] = str(service.port)
+    # 兜底: 即便服务因 cwd 相对路径读不到 .env, 注入的 MYSQL_*/REDIS_* 环境变量也能让
+    # pydantic-settings 取到正确值(环境变量优先级高于 .env 与默认值), 避免回退默认库 xianyu_data。
+    cfg = load_config(base)
+    env["MYSQL_HOST"] = str(cfg["mysql"]["host"])
+    env["MYSQL_PORT"] = str(cfg["mysql"]["port"])
+    env["MYSQL_USER"] = str(cfg["mysql"]["user"])
+    env["MYSQL_PASSWORD"] = str(cfg["mysql"]["password"])
+    env["MYSQL_DATABASE"] = str(cfg["mysql"]["database"])
+    env["REDIS_HOST"] = str(cfg["redis"]["host"])
+    env["REDIS_PORT"] = str(cfg["redis"]["port"])
+    env["REDIS_PASSWORD"] = str(cfg["redis"].get("password", ""))
+    env["REDIS_DB"] = str(cfg["redis"].get("db", 0))
+    # 静态文件目录指向 release 之外的持久位置: 上传保存(paths.py)与 /static 挂载
+    # (_bootstrap)都读 STATIC_DIR, 缺省时二者分别解析到 release 内不同子目录
+    # (backend-web/static vs app/static, 互相看不见)且随 update 部署丢失。
+    # 持久化到 portable 根目录后上传即挂载, 部署后历史文件仍可见。
+    static_dir = base / "backend-web" / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    env["STATIC_DIR"] = str(static_dir)
     log_dir = base / "logs" / "app"
     log_dir.mkdir(parents=True, exist_ok=True)
     log = (log_dir / f"{service.name}.log").open("a", encoding="utf-8")
