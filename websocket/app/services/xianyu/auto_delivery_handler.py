@@ -46,6 +46,9 @@ class AutoDeliveryHandler:
         self.parent = parent
         # 初始化亦凡API处理器
         self._yifan_api_handler = YifanApiHandler(self)
+        # 闲鱼出站 connector 缓存（UNSET=未计算）；账号配了代理就一律走代理（fail-closed）
+        self._xianyu_conn_unset = object()
+        self._xianyu_connector = self._xianyu_conn_unset
         # 最近一次发货失败原因（用于记录到数据库）
         self._last_delivery_fail_reason = None
         # 最近一次获取的买家闲鱼明文昵称（pre_check 阶段获取，供写库及备注/API 变量复用）
@@ -58,6 +61,22 @@ class AutoDeliveryHandler:
     
     # ==================== 属性代理 ====================
     
+    def _get_xianyu_connector(self):
+        """按账号代理配置构造 aiohttp connector（缓存）；未配置代理返回 None。
+
+        用于本处理器内所有闲鱼 mtop 出站（订单详情/评价数/关闭订单），
+        保证与聊天 WebSocket 同一出口 IP。fail-closed：配置错误抛错不直连。
+        """
+        if self._xianyu_connector is self._xianyu_conn_unset:
+            from common.services.proxy_factory import (
+                build_aiohttp_proxy_connector, load_account_proxy_fields,
+            )
+            self._xianyu_connector = build_aiohttp_proxy_connector(
+                load_account_proxy_fields(self.cookie_id),
+                context=f"自动发货账号 {self.cookie_id}",
+            )
+        return self._xianyu_connector
+
     @property
     def cookie_id(self):
         return self.parent.cookie_id
@@ -712,7 +731,7 @@ class AutoDeliveryHandler:
                 'cookie': self.cookies_str.replace('\n', '').replace('\r', '') if self.cookies_str else '',
             }
             
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=self._get_xianyu_connector()) as session:
                 async with session.post(
                     'https://h5api.m.goofish.com/h5/mtop.idle.web.trade.order.detail/1.0/',
                     params=params,
@@ -2894,7 +2913,7 @@ class AutoDeliveryHandler:
 
             api_url = 'https://h5api.m.goofish.com/h5/mtop.idle.web.trade.rate.list/1.0/'
 
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=self._get_xianyu_connector()) as session:
                 async with session.post(
                     api_url,
                     params=params,
@@ -3251,7 +3270,7 @@ class AutoDeliveryHandler:
 
             api_url = 'https://h5api.m.goofish.com/h5/mtop.taobao.idle.trade.merchant.close.by.seller/2.0/'
 
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=self._get_xianyu_connector()) as session:
                 async with session.post(
                     api_url,
                     params=params,

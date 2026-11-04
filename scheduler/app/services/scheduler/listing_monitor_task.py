@@ -632,7 +632,10 @@ class ListingMonitorTaskService:
         last_fail_reason: Optional[str] = None
         last_acc_id: Optional[str] = None
         for acc in candidates:
-            client = XianyuOrderClient(acc.account_id, acc.cookie, owner_id=acc.owner_id)
+            client = XianyuOrderClient(
+                acc.account_id, acc.cookie, owner_id=acc.owner_id,
+                proxy=task_proxy,  # 与本任务采集搜索同一出口 IP，避免任务内劈叉
+            )
             result = await client.place_order(item_id)
             acc.cookie = client.cookies_str  # 令牌刷新回写
             status = result.get("status")

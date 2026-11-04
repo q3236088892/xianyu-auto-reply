@@ -95,6 +95,52 @@ def webrtc_policy_args() -> list[str]:
     return ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
 
 
+def account_aiohttp_proxy_url(fields: Dict[str, Any], context: str = "") -> str:
+    """从 proxy 字段 dict 构建 aiohttp 代理 URL；未配置代理返回 ''。
+
+    fields 通常来自 resolve_proxy_fields(account) 或 load_account_proxy_fields(account_id)。
+    fail-closed：已配置类型但缺 host/port 时抛 ProxyConfigError，禁止按直连处理。
+    """
+    ptype = (fields.get("proxy_type") or "none").lower()
+    require_proxy(ptype, fields.get("proxy_host"), fields.get("proxy_port"),
+                  context=context or "aiohttp 代理")
+    if ptype in ("none", ""):
+        return ""
+    return aiohttp_proxy_url(
+        ptype, fields.get("proxy_host") or "", int(fields.get("proxy_port") or 0),
+        fields.get("proxy_user"), fields.get("proxy_pass"),
+    )
+
+
+def build_aiohttp_proxy_connector(fields: Dict[str, Any], context: str = ""):
+    """按 proxy 字段 dict 构造 aiohttp_socks ProxyConnector；未配置代理返回 None。
+
+    返回 None 时调用方用默认 TCPConnector（=账号未配置代理，直连合法）。
+    fail-closed：已配置但缺字段/类型未知/缺 aiohttp-socks 依赖时抛错。
+    """
+    ptype = (fields.get("proxy_type") or "none").lower()
+    if ptype in ("none", ""):
+        return None
+    require_proxy(ptype, fields.get("proxy_host"), fields.get("proxy_port"),
+                  context=context or "aiohttp connector")
+    try:
+        from aiohttp_socks import ProxyConnector, ProxyType
+    except ImportError as e:
+        raise ProxyConfigError(f"缺少 aiohttp-socks 依赖(fail-closed，禁止直连): {e}") from e
+    mapping = {"socks5": ProxyType.SOCKS5, "socks4": ProxyType.SOCKS4,
+               "http": ProxyType.HTTP, "https": ProxyType.HTTP}
+    if ptype not in mapping:
+        raise ProxyConfigError(f"未知代理类型: {ptype}(fail-closed，禁止直连)")
+    return ProxyConnector(
+        proxy_type=mapping[ptype],
+        host=fields.get("proxy_host"),
+        port=int(fields.get("proxy_port") or 0),
+        username=fields.get("proxy_user") or None,
+        password=fields.get("proxy_pass") or None,
+        rdns=True,
+    )
+
+
 def require_proxy(proxy_type: Optional[str], host: Optional[str], port: Optional[int],
                   context: str = "") -> None:
     """fail-closed 校验: 已配置代理但缺关键字段时抛 ProxyConfigError, 禁止降级直连。"""

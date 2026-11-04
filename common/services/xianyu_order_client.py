@@ -55,10 +55,14 @@ def _is_yhb_only_error(error: Optional[str]) -> bool:
 class XianyuOrderClient:
     """闲鱼下单客户端（单账号）"""
 
-    def __init__(self, cookie_id: str, cookies_str: str, owner_id: Optional[int] = None):
+    def __init__(self, cookie_id: str, cookies_str: str, owner_id: Optional[int] = None,
+                 proxy: Optional[str] = None):
         self.cookie_id = cookie_id
         self.cookies_str = cookies_str
         self.owner_id = owner_id
+        # aiohttp 代理 URL（http:// 或 socks5://user:pass@host:port），空=直连。
+        # 账号已配置代理时调用方必须传入，否则下单从本机 IP 出站与登录/聊天劈叉。
+        self.proxy = proxy
 
     async def _call(self, api: str, version: str, data: dict) -> Dict[str, Any]:
         """通用 mtop 调用（令牌过期自动刷新重试、Session/风控切换账号）。
@@ -68,6 +72,7 @@ class XianyuOrderClient:
         result = await mtop_call(
             self.cookie_id, self.cookies_str, api, version, data,
             owner_id=self.owner_id,
+            proxy=self.proxy,
         )
         # 令牌刷新后，回写实例 Cookie，供同一商品的后续调用（render->create）复用
         self.cookies_str = result.get("cookies_str", self.cookies_str)

@@ -48,6 +48,7 @@ class XianyuItemDetailClient:
         result = await mtop_call(
             self.cookie_id, self.cookies_str, DETAIL_API, DETAIL_VERSION, {"itemId": str(item_id)},
             owner_id=self.owner_id,
+            proxy=self.proxy,
             extra_params={"spm_cnt": "a21ybx.item.0.0"},
         )
         # 令牌刷新后回写实例 Cookie

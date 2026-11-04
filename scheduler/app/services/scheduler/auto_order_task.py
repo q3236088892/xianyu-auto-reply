@@ -31,6 +31,7 @@ from common.models.listing_monitor_item import ListingMonitorItem
 from common.models.listing_monitor_task import ListingMonitorTask
 from common.models.xy_account import XYAccount
 from common.services.listing_monitor_dedup import has_owner_ordered_item
+from common.services.proxy_factory import account_aiohttp_proxy_url, resolve_proxy_fields
 from common.services.order_account_loader import (
     load_fallback_accounts,
     load_xy_accounts_by_ids,
@@ -444,7 +445,11 @@ class AutoOrderTaskService:
 
         Returns: (status, 订单ID, 失败原因)，status ∈ {"success","account_invalid","failed"}
         """
-        client = XianyuOrderClient(account.account_id, account.cookie, owner_id=account.owner_id)
+        client = XianyuOrderClient(
+            account.account_id, account.cookie, owner_id=account.owner_id,
+            proxy=account_aiohttp_proxy_url(
+                resolve_proxy_fields(account), context=f"自动下单账号 {account.account_id}"),
+        )
         result = await client.place_order(item_id)
         # 令牌可能已刷新：回写内存账号Cookie，供同账号后续商品复用
         account.cookie = client.cookies_str
