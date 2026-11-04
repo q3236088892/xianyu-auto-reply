@@ -66,6 +66,7 @@ async def request_im_token(
     device_id: str,
     *,
     timeout_seconds: int = 30,
+    proxy_connector=None,
 ) -> ImTokenApiResult:
     """调用闲鱼 IM Token API。
 
@@ -73,6 +74,8 @@ async def request_im_token(
         cookies_str: 账号 Cookie 字符串。
         device_id: 本次请求必须使用的 Device ID。
         timeout_seconds: HTTP 请求总超时秒数。
+        proxy_connector: 账号代理 connector（proxy_connector_for_account 产物），
+            已配置代理的账号必须传入，保证与聊天/登录同出口 IP。
 
     Returns:
         包含响应 JSON、响应 Cookie、状态码和耗时的结果。
@@ -133,7 +136,7 @@ async def request_im_token(
     }
 
     started_at = time.time()
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=proxy_connector) as session:
         async with session.post(
             IM_TOKEN_API_URL,
             params=params,

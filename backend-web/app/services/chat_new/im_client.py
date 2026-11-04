@@ -140,7 +140,11 @@ class GoofishImClient:
                 "Accept-Encoding": "gzip, deflate, br, zstd",
                 "Accept-Language": "zh-CN,zh;q=0.9",
             }
-            self._session = aiohttp.ClientSession()
+            from common.services.proxy_factory import proxy_connector_for_account
+            self._proxy_connector = proxy_connector_for_account(
+                self.account_id, context=f"聊天IM账号 {self.account_id}",
+            )
+            self._session = aiohttp.ClientSession(connector=self._proxy_connector)
             # 超时策略（应对 wss:// 网络抖动）：
             # - total=None:      WebSocket 是长连接，原 total=30 会强制 30 秒后断开整个会话
             # - connect=30:      TCP + SSL/TLS 握手 + 连接池等待的超时（关键！wss 的 TLS 握手由此覆盖）
@@ -667,7 +671,10 @@ class GoofishImClient:
                 ),
             }
 
-            async with aiohttp.ClientSession() as session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(self.account_id, context=f"IM Token账号 {self.account_id}"),
+            ) as session:
                 async with session.post(
                     TOKEN_API_URL,
                     params=params,

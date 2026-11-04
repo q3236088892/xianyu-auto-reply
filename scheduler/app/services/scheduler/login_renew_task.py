@@ -276,7 +276,10 @@ class LoginRenewTaskService:
         }
         
         try:
-            async with aiohttp.ClientSession() as http_session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(account_id, context=f"登录续期账号 {account_id}"),
+            ) as http_session:
                 async with http_session.post(
                     'https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.pc.loginuser.get/1.0/',
                     params=params,

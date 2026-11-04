@@ -415,10 +415,31 @@ class CookieRenewBrowserService:
             logger.info(f"{log_prefix} 启动Playwright浏览器（持久化模式）...")
             playwright = sync_playwright().start()
 
+            # 阶段E补完：按账号代理配置注入浏览器代理（socks5+认证走同步中继，
+            # Chromium 不支持带认证 socks5）；WebRTC 封堵无条件附加
+            from common.services.proxy_factory import (
+                load_account_proxy_fields, playwright_proxy, require_proxy, webrtc_policy_args,
+            )
+            from common.services.socks5_relay import prepare_playwright_proxy_sync
+            proxy_fields = load_account_proxy_fields(pure_user_id)
+            require_proxy(
+                proxy_fields.get("proxy_type"), proxy_fields.get("proxy_host"),
+                proxy_fields.get("proxy_port"), context=f"Cookie续期浏览器账号 {pure_user_id}",
+            )
+            raw_proxy = playwright_proxy(
+                proxy_fields.get("proxy_type") or "none",
+                proxy_fields.get("proxy_host") or "",
+                int(proxy_fields.get("proxy_port") or 0),
+                proxy_fields.get("proxy_user"), proxy_fields.get("proxy_pass"),
+            )
+            launch_proxy, proxy_relay = prepare_playwright_proxy_sync(raw_proxy)
+            if launch_proxy:
+                logger.info(f"{log_prefix} 续期浏览器走代理: {launch_proxy.get('server')}")
+
             # 构建持久化上下文启动参数
             launch_kwargs: dict[str, Any] = {
                 "headless": False,
-                "args": self.BROWSER_ARGS,
+                "args": [*self.BROWSER_ARGS, *webrtc_policy_args()],
                 "user_agent": browser_user_agent(),
                 "locale": "zh-CN",
                 "timezone_id": "Asia/Shanghai",
@@ -433,12 +454,15 @@ class CookieRenewBrowserService:
                 launch_kwargs["no_viewport"] = True
                 launch_kwargs["args"] = [
                     *self.BROWSER_ARGS,
+                    *webrtc_policy_args(),
                     "--window-size=1920,1080",
                 ]
 
             chromium_path = get_chromium_executable_path()
             if chromium_path:
                 launch_kwargs["executable_path"] = chromium_path
+            if launch_proxy:
+                launch_kwargs["proxy"] = launch_proxy
 
             # 启动前清理可能残留的 Singleton 锁文件（已持有账号锁，清理是安全的）
             self._clean_singleton_lock_files(user_data_dir, log_prefix)
@@ -599,6 +623,12 @@ class CookieRenewBrowserService:
                 message=f"浏览器续期异常: {exc}",
             )
         finally:
+            # 关闭认证中继（先关浏览器再关中继，避免悬挂连接拖住中继线程）
+            if proxy_relay is not None:
+                try:
+                    proxy_relay.close()
+                except Exception as relay_close_e:
+                    logger.warning(f"{log_prefix} 关闭代理中继异常: {relay_close_e}")
             # 清理浏览器资源（持久化上下文模式：关闭 context 即可，无独立 browser 对象）
             if page:
                 try:

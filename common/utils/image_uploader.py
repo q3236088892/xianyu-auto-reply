@@ -19,15 +19,16 @@ from PIL import Image
 class ImageUploader:
     """图片上传器 - 上传图片到闲鱼CDN"""
     
-    def __init__(self, cookies_str: str):
+    def __init__(self, cookies_str: str, proxy_connector=None):
         self.cookies_str = cookies_str
+        self._proxy_connector = proxy_connector
         self.upload_url = "https://stream-upload.goofish.com/api/upload.api?floderId=0&appkey=xy_chat&_input_charset=utf-8"
         self.session: Optional[aiohttp.ClientSession] = None
     
     async def create_session(self):
         """创建HTTP会话"""
         if not self.session:
-            connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+            connector = self._proxy_connector or aiohttp.TCPConnector(limit=100, limit_per_host=30)
             timeout = aiohttp.ClientTimeout(total=30)
             self.session = aiohttp.ClientSession(
                 connector=connector,

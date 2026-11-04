@@ -130,10 +130,29 @@ class CookiesRefreshService:
             playwright = sync_playwright().start()
             logger.info(f"【COOKIES续期】账号 {account.account_id} Playwright启动成功")
 
+            # 阶段E补完：按账号代理注入（socks5+认证走同步中继）+ WebRTC 封堵
+            from common.services.proxy_factory import (
+                load_account_proxy_fields, playwright_proxy, require_proxy, webrtc_policy_args,
+            )
+            from common.services.socks5_relay import prepare_playwright_proxy_sync
+            _pf = load_account_proxy_fields(account.account_id)
+            require_proxy(
+                _pf.get("proxy_type"), _pf.get("proxy_host"), _pf.get("proxy_port"),
+                context=f"Cookies续期浏览器账号 {account.account_id}",
+            )
+            _raw_proxy = playwright_proxy(
+                _pf.get("proxy_type") or "none",
+                _pf.get("proxy_host") or "", int(_pf.get("proxy_port") or 0),
+                _pf.get("proxy_user"), _pf.get("proxy_pass"),
+            )
+            launch_proxy, proxy_relay = prepare_playwright_proxy_sync(_raw_proxy)
             launch_kwargs: dict[str, Any] = {
                 "headless": True,
-                "args": self.BROWSER_ARGS,
+                "args": [*self.BROWSER_ARGS, *webrtc_policy_args()],
             }
+            if launch_proxy:
+                launch_kwargs["proxy"] = launch_proxy
+                logger.info(f"【COOKIES续期】账号 {account.account_id} 浏览器走代理: {launch_proxy.get('server')}")
             chromium_path = get_chromium_executable_path()
             if chromium_path:
                 launch_kwargs["executable_path"] = chromium_path
@@ -196,6 +215,11 @@ class CookiesRefreshService:
                 cookies=[],
             )
         finally:
+            if proxy_relay is not None:
+                try:
+                    proxy_relay.close()
+                except Exception:
+                    pass
             if page:
                 try:
                     page.close()

@@ -153,7 +153,7 @@ class CookieRenewApiService:
             logger.error(f"{log_prefix} 浏览器续期异常: {exc}")
 
         # ========== 第2步：接口续期（浏览器续期成功后也必须执行，确保长登录token刷新） ==========
-        result = await self._do_api_renew_with_retry(browser_cookies_str, log_prefix)
+        result = await self._do_api_renew_with_retry(browser_cookies_str, log_prefix, account_id)
 
         if result["long_login_has_cookies"]:
             step_details_parts.append("第2步-接口续期: 成功（setLoginSettings返回了Set-Cookie）")
@@ -206,7 +206,7 @@ class CookieRenewApiService:
         step_details_parts: list[str] = []
 
         # ========== 第1步：接口续期 ==========
-        result = await self._do_api_renew_with_retry(cookies_str, log_prefix)
+        result = await self._do_api_renew_with_retry(cookies_str, log_prefix, account_id)
 
         if result["long_login_has_cookies"]:
             step_details_parts.append("第1步-接口续期: 成功（setLoginSettings返回了Set-Cookie）")
@@ -246,7 +246,7 @@ class CookieRenewApiService:
                 # 浏览器续期成功后，必须再调用 setLoginSettings.do 验证长登录token
                 # 只有 setLoginSettings 返回 Set-Cookie 才算真正续期成功
                 api_verify_result = await self._do_api_renew_with_retry(
-                    browser_renewed_cookies_str, f"{log_prefix}[浏览器后验证]"
+                    browser_renewed_cookies_str, f"{log_prefix}[浏览器后验证]", account_id
                 )
 
                 if api_verify_result["long_login_has_cookies"]:
@@ -296,15 +296,15 @@ class CookieRenewApiService:
             step_details=" → ".join(step_details_parts),
         )
 
-    async def _do_api_renew_with_retry(self, cookies_str: str, log_prefix: str) -> dict:
+    async def _do_api_renew_with_retry(self, cookies_str: str, log_prefix: str, account_id: str = "") -> dict:
         """执行接口续期（含一次重试）。"""
-        result = await self._do_renew_once(cookies_str, log_prefix)
+        result = await self._do_renew_once(cookies_str, log_prefix, account_id)
 
         if not result["long_login_has_cookies"]:
             logger.info(f"{log_prefix} setLoginSettings未返回Set-Cookie，2秒后重试...")
             await asyncio.sleep(2)
             retry_cookies_str = result["new_cookies_str"]
-            result = await self._do_renew_once(retry_cookies_str, f"{log_prefix}[重试]")
+            result = await self._do_renew_once(retry_cookies_str, f"{log_prefix}[重试]", account_id)
 
         return result
 
@@ -326,6 +326,7 @@ class CookieRenewApiService:
         self,
         cookies_str: str,
         log_prefix: str,
+        account_id: str = "",
     ) -> dict:
         """执行一次续期（依次调用三个接口并合并结果）。
 
@@ -350,7 +351,7 @@ class CookieRenewApiService:
             )
 
         # 2. 调用 silentHasLogin.do
-        has_login_result = await self._call_has_login_api(current_cookies_str, log_prefix)
+        has_login_result = await self._call_has_login_api(current_cookies_str, log_prefix, account_id)
         set_cookie_headers: list[str] = has_login_result["set_cookie_headers"]
         api_success: bool = has_login_result["api_success"]
         api_message: str = has_login_result["api_message"]
@@ -363,7 +364,7 @@ class CookieRenewApiService:
             )
 
         # 3. 调用 setLoginSettings.do（长登录续期）
-        long_login_set_cookies = await self._call_set_login_settings(current_cookies_str, log_prefix)
+        long_login_set_cookies = await self._call_set_login_settings(current_cookies_str, log_prefix, account_id)
         long_login_has_cookies = len(long_login_set_cookies) > 0
         if long_login_set_cookies:
             all_set_cookie_headers.extend(long_login_set_cookies)
@@ -476,7 +477,11 @@ class CookieRenewApiService:
                 f"&pageTraceId={page_trace_id}"
             )
 
-            async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as http_session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                cookie_jar=aiohttp.DummyCookieJar(),
+                connector=proxy_connector_for_account(account_id, context=f"Cookie续期账号 {account_id}"),
+            ) as http_session:
                 async with http_session.post(
                     _HAS_LOGIN_URL_WEB,
                     params=params,
@@ -539,6 +544,7 @@ class CookieRenewApiService:
         self,
         cookies_str: str,
         log_prefix: str,
+        account_id: str = "",
     ) -> dict[str, Any]:
         """调用 silentHasLogin.do 接口。
 
@@ -579,7 +585,11 @@ class CookieRenewApiService:
         }
 
         try:
-            async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as http_session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                cookie_jar=aiohttp.DummyCookieJar(),
+                connector=proxy_connector_for_account(account_id, context=f"Cookie续期账号 {account_id}"),
+            ) as http_session:
                 async with http_session.post(
                     _HAS_LOGIN_URL,
                     params=params,
@@ -657,6 +667,7 @@ class CookieRenewApiService:
         self,
         cookies_str: str,
         log_prefix: str,
+        account_id: str = "",
     ) -> list[str]:
         """调用 setLoginSettings.do 续期长登录token。
 
@@ -686,7 +697,11 @@ class CookieRenewApiService:
         }
 
         try:
-            async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as http_session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                cookie_jar=aiohttp.DummyCookieJar(),
+                connector=proxy_connector_for_account(account_id, context=f"Cookie续期账号 {account_id}"),
+            ) as http_session:
                 async with http_session.post(
                     _SET_LOGIN_SETTINGS_URL,
                     params=params,

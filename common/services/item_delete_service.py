@@ -336,7 +336,10 @@ async def delete_item_from_xianyu(
             "cookie_saved": True,
             "cookie_message": "未调用删除接口",
         }
-    async with aiohttp.ClientSession() as http_session:
+    from common.services.proxy_factory import proxy_connector_for_account
+    async with aiohttp.ClientSession(
+        connector=proxy_connector_for_account(account_id, context=f"删除商品账号 {account_id}"),
+    ) as http_session:
         return await _delete_item_with_session(
             http_session=http_session,
             account_id=account_id,
@@ -369,7 +372,10 @@ async def batch_delete_items_from_xianyu(
 
     current_cookies = cookies_str
     results: list[dict[str, Any]] = []
-    async with aiohttp.ClientSession() as http_session:
+    from common.services.proxy_factory import proxy_connector_for_account
+    async with aiohttp.ClientSession(
+        connector=proxy_connector_for_account(account_id, context=f"删除商品账号 {account_id}"),
+    ) as http_session:
         for item_index, item_id in enumerate(cleaned_ids):
             result = await _delete_item_with_session(
                 http_session=http_session,

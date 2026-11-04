@@ -146,6 +146,29 @@ class DrissionPageSliderService:
         co.set_user_data_path(self.user_data_dir)
         # 自动分配调试端口，避免冲突
         co.set_argument("--remote-debugging-port=0")
+
+        # 阶段E补完：按账号代理注入（socks5+认证走同步中继，DrissionPage
+        # 不支持带认证 socks5）；WebRTC 封堵在下方参数循环附加
+        from common.services.proxy_factory import (
+            load_account_proxy_fields, webrtc_policy_args,
+        )
+        from common.services.socks5_relay import prepare_playwright_proxy_sync
+        from common.services.proxy_factory import playwright_proxy, require_proxy
+        _pf = load_account_proxy_fields(self.pure_user_id)
+        require_proxy(
+            _pf.get("proxy_type"), _pf.get("proxy_host"), _pf.get("proxy_port"),
+            context=f"DrissionPage滑块账号 {self.pure_user_id}",
+        )
+        _raw = playwright_proxy(
+            _pf.get("proxy_type") or "none",
+            _pf.get("proxy_host") or "", int(_pf.get("proxy_port") or 0),
+            _pf.get("proxy_user"), _pf.get("proxy_pass"),
+        )
+        _launch_proxy, _relay = prepare_playwright_proxy_sync(_raw)
+        self._proxy_relay = _relay
+        if _launch_proxy:
+            co.set_proxy(_launch_proxy["server"])
+            logger.info(f"【{self.pure_user_id}】DrissionPage 走代理: {_launch_proxy['server']}")
         co.headless(on_off=self.headless)
         co.no_imgs(True)
 
@@ -165,6 +188,7 @@ class DrissionPageSliderService:
             "--disable-backgrounding-occluded-windows",
             "--disable-ipc-flooding-protection",
             "--window-size=1920,1080",
+            *webrtc_policy_args(),
         ):
             co.set_argument(arg)
 
@@ -387,6 +411,13 @@ class DrissionPageSliderService:
 
     def close(self) -> None:
         """关闭浏览器并释放账号锁与并发槽位。"""
+        _relay = getattr(self, "_proxy_relay", None)
+        if _relay is not None:
+            try:
+                _relay.close()
+            except Exception:
+                pass
+            self._proxy_relay = None
         try:
             if self.browser is not None:
                 try:

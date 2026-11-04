@@ -335,8 +335,12 @@ class PlaywrightSliderService:
                     f"【{self.pure_user_id}】滑块浏览器代理配置异常"
                     f"(fail-closed，禁止直连): {proxy_e}"
                 ) from proxy_e
-            if proxy_dict:
-                logger.info(f"【{self.pure_user_id}】滑块浏览器走代理 {proxy_dict.get('server')}")
+            # socks5+认证 → 起同步中继换免密本地端口（Chromium 不支持带认证 socks5）
+            from common.services.socks5_relay import prepare_playwright_proxy_sync
+            launch_proxy, proxy_relay = prepare_playwright_proxy_sync(proxy_dict)
+            self._proxy_relay = proxy_relay
+            if launch_proxy:
+                logger.info(f"【{self.pure_user_id}】滑块浏览器走代理 {launch_proxy.get('server')}")
             else:
                 logger.info(f"【{self.pure_user_id}】滑块浏览器未配置代理, 本机直连")
 
@@ -379,8 +383,8 @@ class PlaywrightSliderService:
                 # 密码登录分支也统一为单一来源 UA(不再用旧的 138 字面量)
                 launch_kwargs['viewport'] = {'width': 1980, 'height': 1024}
                 launch_kwargs['user_agent'] = browser_user_agent()
-            if proxy_dict:
-                launch_kwargs['proxy'] = proxy_dict
+            if launch_proxy:
+                launch_kwargs['proxy'] = launch_proxy
 
             executable_path = self._find_browser_executable()
             if executable_path:
@@ -1528,7 +1532,16 @@ class PlaywrightSliderService:
         """关闭服务"""
         pure_id = getattr(self, 'pure_user_id', 'unknown')
         logger.info(f"【{pure_id}】开始清理资源...")
-        
+
+        # 关闭认证中继（浏览器已随 _cleanup 关闭，悬挂连接由中继超时清理）
+        relay = getattr(self, '_proxy_relay', None)
+        if relay is not None:
+            try:
+                relay.close()
+            except Exception as relay_e:
+                logger.warning(f"【{pure_id}】关闭代理中继异常: {relay_e}")
+            self._proxy_relay = None
+
         # 先清理浏览器资源
         self._cleanup()
 

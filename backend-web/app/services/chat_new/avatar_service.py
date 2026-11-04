@@ -190,7 +190,10 @@ async def _fetch_user_info_from_api(
             "cookie": cookies_str.replace("\n", "").replace("\r", ""),
         }
 
-        async with aiohttp.ClientSession() as http_session:
+        from common.services.proxy_factory import proxy_connector_for_account
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"头像查询账号 {account_id}"),
+        ) as http_session:
             async with http_session.post(
                 USER_QUERY_URL,
                 params=params,

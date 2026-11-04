@@ -135,7 +135,10 @@ async def batch_offline_items_from_xianyu(
             "cookie": cookies_str.replace("\n", "").replace("\r", ""),
         }
 
-        async with aiohttp.ClientSession() as http_session:
+        from common.services.proxy_factory import proxy_connector_for_account
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"下架商品账号 {account_id}"),
+        ) as http_session:
             async with http_session.post(
                 BATCH_OFFLINE_URL,
                 params=params,

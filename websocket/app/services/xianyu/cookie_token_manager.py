@@ -1080,7 +1080,11 @@ class CookieTokenManager:
                     logger.warning(f"【{self.cookie_id}】从数据库重新加载cookie失败，继续使用当前cookie: {self._safe_str(reload_e)}")
 
             logger.info(f"【{self.cookie_id}】发起Token刷新API请求")
-            api_result = await request_im_token(self.cookies_str, self.device_id)
+            from common.services.proxy_factory import proxy_connector_for_account
+            api_result = await request_im_token(
+                self.cookies_str, self.device_id,
+                proxy_connector=proxy_connector_for_account(self.cookie_id, context=f"IM Token 刷新账号 {self.cookie_id}"),
+            )
             logger.info(
                 f"【{self.cookie_id}】Token刷新API响应: "
                 f"状态码={api_result.status_code}, 耗时={api_result.duration_seconds:.2f}秒"
@@ -1614,7 +1618,13 @@ class CookieTokenManager:
                 logger.info(f"【{self.cookie_id}】已创建测试图片: {test_image_path}")
                 
                 from common.utils.image_uploader import ImageUploader
-                uploader = ImageUploader(cookies_str=self.cookies_str)
+                from common.services.proxy_factory import proxy_connector_for_account
+
+                uploader = ImageUploader(cookies_str=self.cookies_str,
+
+                    proxy_connector=proxy_connector_for_account(self.cookie_id, context=f"图片上传账号 {self.cookie_id}"),
+
+                )
                 
                 await uploader.create_session()
                 

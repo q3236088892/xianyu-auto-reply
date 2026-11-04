@@ -1846,7 +1846,16 @@ class XianyuAsync:
                 if os.path.exists(local_image_path):
                     logger.info(f"[{msg_time}] 【{self.cookie_id}】准备上传确认收货图片到闲鱼CDN: {local_image_path}")
                     
-                    uploader = ImageUploader(self.cookies_str)
+                    from common.services.proxy_factory import proxy_connector_for_account
+
+                    
+                    uploader = ImageUploader(self.cookies_str,
+
+                    
+                        proxy_connector=proxy_connector_for_account(self.cookie_id, context=f"图片上传账号 {self.cookie_id}"),
+
+                    
+                    )
                     
                     async with uploader:
                         cdn_url = await uploader.upload_image(local_image_path)
@@ -1888,7 +1897,16 @@ class XianyuAsync:
                                     try:
                                         logger.info(f"[{msg_time}] 【{self.cookie_id}】从backend-web下载图片成功，准备上传到CDN: {tmp_path}")
                                         
-                                        uploader = ImageUploader(self.cookies_str)
+                                        from common.services.proxy_factory import proxy_connector_for_account
+
+                                        
+                                        uploader = ImageUploader(self.cookies_str,
+
+                                        
+                                            proxy_connector=proxy_connector_for_account(self.cookie_id, context=f"图片上传账号 {self.cookie_id}"),
+
+                                        
+                                        )
                                         
                                         async with uploader:
                                             cdn_url = await uploader.upload_image(tmp_path)
@@ -2378,7 +2396,13 @@ class XianyuAsync:
                         logger.warning(f"【{self.cookie_id}】获取图片尺寸失败，使用默认尺寸: {e}")
                     
                     from app.utils.image_uploader import ImageUploader
-                    uploader = ImageUploader(self.cookies_str)
+                    from common.services.proxy_factory import proxy_connector_for_account
+
+                    uploader = ImageUploader(self.cookies_str,
+
+                        proxy_connector=proxy_connector_for_account(self.cookie_id, context=f"图片上传账号 {self.cookie_id}"),
+
+                    )
                     
                     async with uploader:
                         cdn_url = await uploader.upload_image(local_image_path)

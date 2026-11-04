@@ -1045,9 +1045,11 @@ class OrderService:
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
         }
         
+        from common.services.proxy_factory import proxy_connector_for_account
+        _proxy_conn_1048 = proxy_connector_for_account(account_id, context=f"已售订单同步")
         async with aiohttp.ClientSession(
-            connector=get_goofish_connector(),
-            connector_owner=False,
+            connector=_proxy_conn_1048 if _proxy_conn_1048 else get_goofish_connector(),
+            connector_owner=_proxy_conn_1048 is None,
             cookie_jar=aiohttp.DummyCookieJar(),
         ) as session:
             async with session.post(
@@ -1386,9 +1388,11 @@ class OrderService:
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
         }
 
+        from common.services.proxy_factory import proxy_connector_for_account
+        _proxy_conn_1389 = proxy_connector_for_account(account_id, context=f"退款订单同步")
         async with aiohttp.ClientSession(
-            connector=get_goofish_connector(),
-            connector_owner=False,
+            connector=_proxy_conn_1389 if _proxy_conn_1389 else get_goofish_connector(),
+            connector_owner=_proxy_conn_1389 is None,
             cookie_jar=aiohttp.DummyCookieJar(),
         ) as session:
             async with session.post(
@@ -1772,9 +1776,11 @@ class OrderDetailService:
                 'cookie': self.cookies_str,
             }
             
+            from common.services.proxy_factory import proxy_connector_for_account
+            _proxy_conn_1775 = proxy_connector_for_account(self.cookie_id, context=f"订单详情")
             async with aiohttp.ClientSession(
-                connector=get_goofish_connector(),
-                connector_owner=False,
+                connector=_proxy_conn_1775 if _proxy_conn_1775 else get_goofish_connector(),
+                connector_owner=_proxy_conn_1775 is None,
                 cookie_jar=aiohttp.DummyCookieJar(),
             ) as session:
                 async with session.post(
@@ -2183,9 +2189,11 @@ class OrderStatusChecker:
                 'cookie': self.cookies_str,
             }
             
+            from common.services.proxy_factory import proxy_connector_for_account
+            _proxy_conn_2186 = proxy_connector_for_account(self.account_id, context=f"订单状态检查")
             async with aiohttp.ClientSession(
-                connector=get_goofish_connector(),
-                connector_owner=False,
+                connector=_proxy_conn_2186 if _proxy_conn_2186 else get_goofish_connector(),
+                connector_owner=_proxy_conn_2186 is None,
                 cookie_jar=aiohttp.DummyCookieJar(),
             ) as session:
                 async with session.post(

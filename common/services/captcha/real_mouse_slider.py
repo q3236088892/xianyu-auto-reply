@@ -466,6 +466,7 @@ class _RealMouseSolver:
         self.pw = None
         self.context = None
         self.page = None
+        self._proxy_relay = None
         # 每账号独立目录(阶段C): browser_data/real_mouse/<pure_id>/
         self.browser_dir = os.path.join(
             os.path.dirname(_REAL_MOUSE_BROWSER_DIR),
@@ -512,8 +513,12 @@ class _RealMouseSolver:
                 f"(fail-closed，禁止直连): {proxy_e}"
             ) from proxy_e
         launch_args = list(_BROWSER_ARGS) + webrtc_policy_args()
-        if proxy_dict:
-            logger.info(f"【{self.pure_id}】真实鼠标滑块走代理 {proxy_dict.get('server')}")
+        # socks5+认证 → 起同步中继换免密本地端口（Chromium 不支持带认证 socks5）
+        from common.services.socks5_relay import prepare_playwright_proxy_sync
+        launch_proxy, proxy_relay = prepare_playwright_proxy_sync(proxy_dict)
+        self._proxy_relay = proxy_relay
+        if launch_proxy:
+            logger.info(f"【{self.pure_id}】真实鼠标滑块走代理 {launch_proxy.get('server')}")
         else:
             logger.info(f"【{self.pure_id}】真实鼠标滑块未配置代理, 本机直连")
         try:
@@ -523,6 +528,7 @@ class _RealMouseSolver:
                 channel="chrome",          # 用本机真实 Chrome（自然指纹），非自带 Chromium
                 headless=False,            # 真实鼠标必须有可见窗口
                 args=launch_args,
+                proxy=launch_proxy,
                 no_viewport=True,          # 不强制 viewport，保留真实窗口尺寸
                 locale="zh-CN",
                 timezone_id="Asia/Shanghai",
@@ -695,6 +701,14 @@ class _RealMouseSolver:
         self.page = None
         self.context = None
         self.pw = None
+        # 关闭认证中继（浏览器已关，剩余悬挂连接由中继超时清理）
+        relay = getattr(self, "_proxy_relay", None)
+        if relay is not None:
+            try:
+                relay.close()
+            except Exception:
+                pass
+            self._proxy_relay = None
         self._release_browser_lock()
 
     def force_kill(self) -> None:

@@ -501,7 +501,7 @@ async def query_official_blacklist(
     if not account or not account.cookie:
         return ApiResponse(success=False, message="账号不存在或Cookie为空")
     try:
-        data = await official_blacklist_request(account.cookie, cid, "query")
+        data = await official_blacklist_request(account.cookie, cid, "query", account.account_id)
         return ApiResponse(success=True, data={"blocked": bool(data.get("isInBlack"))})
     except Exception as e:
         return ApiResponse(success=False, message=f"查询黑名单状态失败: {e}")
@@ -521,7 +521,7 @@ async def change_official_blacklist(
     if not account or not account.cookie:
         return ApiResponse(success=False, message="账号不存在或Cookie为空")
     try:
-        await official_blacklist_request(account.cookie, cid, action)
+        await official_blacklist_request(account.cookie, cid, action, account.account_id)
         blocked = action == "add"
         return ApiResponse(
             success=True,

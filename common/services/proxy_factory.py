@@ -225,3 +225,14 @@ def load_account_proxy_fields(account_id: str) -> Dict[str, Any]:
         raise ProxyConfigError(
             f"【{account_id}】浏览器代理: 查询失败(fail-closed，禁止按直连处理): {e}"
         ) from e
+
+
+def proxy_connector_for_account(account_id: str, context: str = ""):
+    """按 account_id 查代理配置并构造 aiohttp connector；未配置代理返回 None。
+
+    fail-closed：查库失败/配置非法抛 ProxyConfigError，禁止静默直连。
+    """
+    return build_aiohttp_proxy_connector(
+        load_account_proxy_fields(account_id),
+        context=context or f"账号 {account_id}",
+    )

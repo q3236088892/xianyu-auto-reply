@@ -210,3 +210,73 @@ async def start_socks5_auth_relay(server: str, username: str, password: str) -> 
         raise ValueError(f"无法解析 socks5 server: {server}")
     relay = Socks5AuthRelay(host, int(port), username, password)
     return await relay.start()
+
+
+class SyncSocks5Relay:
+    """同步上下文（sync_playwright 所在线程）用的 SOCKS5 认证中继。
+
+    在独立守护线程里跑专属事件循环，Chromium 通过免密本地端口连接，
+    由中继完成上游带认证握手。用完必须 close()。
+    """
+
+    def __init__(self, server: str, username: str, password: str):
+        self._server = server
+        self._username = username
+        self._password = password
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread = None
+        self._relay: Optional[Socks5AuthRelay] = None
+        self.port: int = 0
+
+    def start(self, timeout: float = 10) -> "SyncSocks5Relay":
+        import threading
+        self._loop = asyncio.new_event_loop()
+        def _run() -> None:
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+        self._thread = threading.Thread(target=_run, daemon=True, name="socks5-auth-relay")
+        self._thread.start()
+        fut = asyncio.run_coroutine_threadsafe(
+            start_socks5_auth_relay(self._server, self._username, self._password),
+            self._loop,
+        )
+        self._relay = fut.result(timeout=timeout)
+        self.port = self._relay.port
+        return self
+
+    @property
+    def proxy_dict(self) -> dict:
+        return {"server": f"socks5://127.0.0.1:{self.port}"}
+
+    def close(self, timeout: float = 10) -> None:
+        if self._relay is not None and self._loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._relay.close(), self._loop,
+                ).result(timeout=timeout)
+            except Exception:
+                pass
+            self._relay = None
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._loop = None
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+
+def prepare_playwright_proxy_sync(proxy_dict: Optional[dict]) -> tuple:
+    """同步浏览器启动点统一入口。
+
+    返回 (launch 用 proxy_dict, 中继句柄或 None)。socks5+认证时自动起
+    SyncSocks5Relay 换成免密本地端口（Chromium 不支持 socks5 认证）；
+    调用方须在浏览器关闭后 relay.close()。
+    """
+    if not proxy_dict:
+        return None, None
+    if proxy_dict.get("username") and str(proxy_dict.get("server", "")).startswith("socks5://"):
+        relay = SyncSocks5Relay(
+            proxy_dict["server"], proxy_dict["username"], proxy_dict.get("password", ""),
+        ).start()
+        return relay.proxy_dict, relay
+    return proxy_dict, None

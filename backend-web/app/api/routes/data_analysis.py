@@ -93,6 +93,7 @@ async def get_seller_summary(
         cookies_str=account.cookie,
         date_type=request.date_type,
         date_range=request.date_range or "",
+        account_id=account.account_id,
     )
 
     if api_result.get("success"):
@@ -180,6 +181,7 @@ async def get_browse_summary(
         cookies_str=account.cookie,
         date_type=request.date_type,
         date_range=request.date_range or "",
+        account_id=account.account_id,
     )
 
     if api_result.get("success"):

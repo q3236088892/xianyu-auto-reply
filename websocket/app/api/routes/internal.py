@@ -523,7 +523,11 @@ async def solve_captcha(request: SolveCaptchaRequest):
                 token_request_cookies = merged_cookies_str
                 last_token_response: object = None
                 for token_attempt in range(2):
-                    token_result = await request_im_token(token_request_cookies, device_id)
+                    from common.services.proxy_factory import proxy_connector_for_account
+                    token_result = await request_im_token(
+                        token_request_cookies, device_id,
+                        proxy_connector=proxy_connector_for_account(safe_id, context=f"过滑块Token账号 {safe_id}"),
+                    )
                     last_token_response = token_result.response_json
                     if token_result.response_cookies:
                         response_cookies = dict(token_result.response_cookies)

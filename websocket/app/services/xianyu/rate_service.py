@@ -152,7 +152,11 @@ class RateService:
             url = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.rate.create/4.0/"
             
             timeout = aiohttp.ClientTimeout(total=20)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                connector=proxy_connector_for_account(self.account_id, context=f"评价账号 {self.account_id}"),
+            ) as session:
                 async with session.post(url, params=params, headers=headers, data={"data": data_val}) as response:
                     result = await response.json()
                     

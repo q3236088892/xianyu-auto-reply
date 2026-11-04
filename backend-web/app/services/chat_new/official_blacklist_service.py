@@ -17,7 +17,7 @@ API_VERSIONS = {
 }
 
 
-async def official_blacklist_request(cookies_str: str, session_id: str, action: str) -> dict[str, Any]:
+async def official_blacklist_request(cookies_str: str, session_id: str, action: str, account_id: str = "") -> dict[str, Any]:
     api, version = API_VERSIONS[action]
     data_val = json.dumps({"sessionId": str(session_id)}, separators=(",", ":"))
     timestamp = str(int(time.time() * 1000))
@@ -45,7 +45,10 @@ async def official_blacklist_request(cookies_str: str, session_id: str, action: 
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/146.0.0.0 Safari/537.36",
     }
     url = f"https://h5api.m.goofish.com/h5/{api}/{version}/"
-    async with aiohttp.ClientSession() as session:
+    from common.services.proxy_factory import proxy_connector_for_account
+    async with aiohttp.ClientSession(
+        connector=proxy_connector_for_account(account_id, context=f"官方黑名单账号 {account_id}"),
+    ) as session:
         async with session.post(
             url, params=params, data={"data": data_val}, headers=headers,
             timeout=aiohttp.ClientTimeout(total=20),

@@ -35,6 +35,7 @@ async def fetch_seller_summary(
     date_type: str = "recent7d",
     date_range: str = "",
     retry_count: int = 0,
+    account_id: str = "",
 ) -> Dict[str, Any]:
     """
     获取卖家数据概览
@@ -106,7 +107,10 @@ async def fetch_seller_summary(
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
+        from common.services.proxy_factory import proxy_connector_for_account
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"数据分析账号 {account_id}"),
+        ) as session:
             async with session.post(
                 SELLER_SUMMARY_URL,
                 params=params,
@@ -165,6 +169,7 @@ async def fetch_browse_summary(
     date_type: str = "recent7d",
     date_range: str = "",
     retry_count: int = 0,
+    account_id: str = "",
 ) -> Dict[str, Any]:
     """
     获取流量分布数据（来源分布、商品分布、时间分布、地域分布）
@@ -234,7 +239,10 @@ async def fetch_browse_summary(
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
+        from common.services.proxy_factory import proxy_connector_for_account
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"数据分析账号 {account_id}"),
+        ) as session:
             async with session.post(
                 BROWSE_SUMMARY_URL,
                 params=params,

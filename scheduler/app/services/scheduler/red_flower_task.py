@@ -381,7 +381,10 @@ class RedFlowerTask:
             retry_tag = "[令牌过期重试] " if is_retry else ""
 
             # 发送请求
-            async with aiohttp.ClientSession() as http_session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(account_id, context=f"小红花账号 {account_id}"),
+            ) as http_session:
                 async with http_session.post(
                     "https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.red.flower/1.0/",
                     params=params,

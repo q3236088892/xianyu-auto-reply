@@ -101,7 +101,18 @@ def request_fresh_captcha_url(
         }
 
         logger.info(f"【{cookie_id}】重新请求新鲜的滑块验证链接...")
-        resp = requests.post(_TOKEN_API_URL, params=params, data=data, headers=headers, timeout=15)
+        # 同步请求但走账号代理（httpx 同步客户端支持 socks5h；fail-closed 配置错误抛异常）
+        from common.services.proxy_factory import (
+            account_aiohttp_proxy_url, load_account_proxy_fields,
+        )
+        proxy_url = account_aiohttp_proxy_url(
+            load_account_proxy_fields(cookie_id), context=f"滑块Token刷新账号 {cookie_id}",
+        )
+        import httpx as _httpx
+        with _httpx.Client(
+            proxy=proxy_url or None, timeout=15, trust_env=False,
+        ) as _client:
+            resp = _client.post(_TOKEN_API_URL, params=params, data=data, headers=headers)
         res_json = resp.json()
 
         # 优先判断 token 是否已可用：风控可能已解除，此时接口直接返回成功 accessToken，无需滑块

@@ -68,6 +68,8 @@ async def _fetch_fish_nick(
 ) -> Optional[str]:
     """内部实现：发起请求获取买家昵称，令牌过期时刷新Cookie重试
 
+    已配置代理的账号经 proxy_connector_for_account 走代理出口（fail-closed）。
+
     Args:
         cookies_str: 当前Cookie字符串
         chat_id: 聊天会话ID
@@ -77,6 +79,7 @@ async def _fetch_fish_nick(
     Returns:
         闲鱼昵称（明文），获取失败返回 None
     """
+    from common.services.proxy_factory import proxy_connector_for_account
     try:
         timestamp = str(int(time.time() * 1000))
         data_str = json.dumps(
@@ -104,7 +107,9 @@ async def _fetch_fish_nick(
             "cookie": cookies_str.replace("\n", "").replace("\r", ""),
         }
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            connector=proxy_connector_for_account(account_id, context=f"买家昵称查询账号 {account_id}"),
+        ) as session:
             async with session.post(
                 USER_QUERY_URL,
                 params=params,

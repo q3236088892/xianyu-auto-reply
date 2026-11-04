@@ -163,7 +163,10 @@ class BuyerCreditRule(BaseDeliveryRule):
 
             api_url = "https://h5api.m.goofish.com/h5/mtop.idle.web.trade.rate.list/1.0/"
 
-            async with aiohttp.ClientSession() as session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(cookie_id, context=f"买家信用查询账号 {cookie_id}"),
+            ) as session:
                 async with session.post(
                     api_url,
                     params=params,

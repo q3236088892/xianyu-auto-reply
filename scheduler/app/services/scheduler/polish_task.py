@@ -168,7 +168,7 @@ class PolishTaskService:
             for item in items:
                 try:
                     # 执行擦亮
-                    result = await self._polish_item(current_cookie_str, item.item_id)
+                    result = await self._polish_item(current_cookie_str, item.item_id, account.account_id)
                     
                     # 如果返回了更新后的cookie，写入数据库并用于后续商品
                     if result.get("cookie_str") and result["cookie_str"] != current_cookie_str:
@@ -292,7 +292,7 @@ class PolishTaskService:
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
-    async def _polish_item(self, cookie_str: str, item_id: str, retry_count: int = 0) -> dict:
+    async def _polish_item(self, cookie_str: str, item_id: str, account_id: str = None, retry_count: int = 0) -> dict:
         """
         擦亮商品
         
@@ -372,7 +372,10 @@ class PolishTaskService:
             }
             
             # 发送请求
-            async with aiohttp.ClientSession() as session:
+            from common.services.proxy_factory import proxy_connector_for_account
+            async with aiohttp.ClientSession(
+                connector=proxy_connector_for_account(account_id, context=f"擦亮账号 {account_id}"),
+            ) as session:
                 async with session.post(
                     'https://h5api.m.goofish.com/h5/mtop.taobao.idle.item.polish/1.0/',
                     params=params,
@@ -409,7 +412,7 @@ class PolishTaskService:
                                     f"已更新Cookie，准备重试({retry_count + 1}/{max_retry - 1})"
                                 )
                                 await asyncio.sleep(0.5)
-                                return await self._polish_item(new_cookie_str, item_id, retry_count + 1)
+                                return await self._polish_item(new_cookie_str, item_id, account_id, retry_count + 1)
                         
                         return {"success": False, "message": error_msg, "cookie_str": new_cookie_str}
                         
