@@ -17,6 +17,8 @@ from typing import Any, Dict, Set
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
+from common.services.proxy_factory import resolve_proxy_fields
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -233,7 +235,10 @@ class ItemService:
 
         myid = self._resolve_account_fetch_user_id(account)
 
-        manager = ItemInfoManager(account.account_id, account.cookie)
+        manager = ItemInfoManager(
+            account.account_id, account.cookie,
+            proxy_fields=resolve_proxy_fields(account),
+        )
         try:
             result = await manager.get_item_list_info(page, page_size, myid=myid)
         except Exception as exc:
@@ -339,7 +344,10 @@ class ItemService:
         myid = self._resolve_account_fetch_user_id(account)
         normalized_required_title_keyword = str(required_title_keyword or "").strip()
 
-        manager = ItemInfoManager(account.account_id, account.cookie)
+        manager = ItemInfoManager(
+            account.account_id, account.cookie,
+            proxy_fields=resolve_proxy_fields(account),
+        )
         fetched_items: list[dict] = []
         total_saved_count = 0
         fetched_pages = 0

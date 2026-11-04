@@ -19,19 +19,24 @@ class ItemInfoManager:
     管理商品信息的获取、保存等操作（纯 HTTP API 调用，不需要 WebSocket）
     """
     
-    def __init__(self, cookie_id: str, cookies_str: str, session=None):
+    def __init__(self, cookie_id: str, cookies_str: str, session=None,
+                 proxy_fields: Optional[dict] = None):
         """初始化商品信息管理器
         
         Args:
             cookie_id: 账号ID
             cookies_str: Cookie字符串
             session: aiohttp session（可选）
+            proxy_fields: 账号代理字段 dict（resolve_proxy_fields 产物，可选）。
+                传入后商品列表同步走账号代理出口，与登录/聊天/发布同 IP；
+                fail-closed：已配置代理但不可用会抛错而非静默直连。
         """
         self.cookie_id = cookie_id
         self.cookies_str = cookies_str
         self.cookies = self._parse_cookies(cookies_str)
         self.session = session
         self._own_session = False
+        self._proxy_fields = proxy_fields
     
     def _parse_cookies(self, cookies_str: str) -> dict:
         """解析Cookie字符串为字典"""
@@ -54,6 +59,7 @@ class ItemInfoManager:
         """
         if not self.session:
             import aiohttp
+            connector = None
             headers = {
                 'accept': 'application/json',
                 'accept-encoding': 'gzip, deflate, br',  # 排除zstd，aiohttp不支持
@@ -66,7 +72,13 @@ class ItemInfoManager:
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'cookie': self.cookies_str
             }
-            connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+            if self._proxy_fields:
+                from common.services.proxy_factory import build_aiohttp_proxy_connector
+                connector = build_aiohttp_proxy_connector(
+                    self._proxy_fields, context=f"商品同步账号 {self.cookie_id}",
+                )
+            if connector is None:
+                connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
             self.session = aiohttp.ClientSession(
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30),
