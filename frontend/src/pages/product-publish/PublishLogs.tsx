@@ -357,13 +357,16 @@ export function PublishLogs() {
               闲鱼风控要求「完成认证才可继续发布」，请用闲鱼App扫描下方二维码。
               系统最长等待10分钟，认证后发布将自动继续。
             </p>
-            <div className="flex justify-center mb-4">
-              <img
-                src={authQrUrl}
-                alt="认证二维码"
-                className="w-56 h-56 object-contain border border-slate-200 dark:border-slate-600 rounded-lg"
-              />
+            <div className="flex justify-center mb-2">
+              <a href={authQrUrl} target="_blank" rel="noreferrer" title="点击放大扫码">
+                <img
+                  src={authQrUrl}
+                  alt="认证二维码"
+                  className="w-64 h-64 object-contain border border-slate-200 dark:border-slate-600 rounded-lg"
+                />
+              </a>
             </div>
+            <p className="text-xs text-slate-400 mb-4">点击图片可放大扫码</p>
             <p className="text-xs text-slate-400 mb-4 flex items-center justify-center gap-1">
               <Loader2 className="w-3 h-3 animate-spin" />
               等待认证中，完成后此弹窗将自动关闭…

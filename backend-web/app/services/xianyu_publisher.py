@@ -1961,16 +1961,53 @@ class XianyuPublisher:
         except Exception:
             return ""
 
+    async def _locate_auth_qr_bbox(self):
+        """在页面里定位认证弹窗的二维码元素，返回视口相对裁剪框（含边距）。
+
+        二维码是正方形大图，取页面中最大的近方形 <img>；整页截图里二维码占比太小，
+        前端弹窗缩略后无法扫码，必须裁出二维码本体。找不到返回 None（退化为整页截图）。
+        """
+        try:
+            return await self.page.evaluate("""() => {
+                const imgs = Array.from(document.images || []);
+                let best = null, bestArea = 0;
+                for (const img of imgs) {
+                    const r = img.getBoundingClientRect();
+                    if (r.width < 80 || r.height < 80) continue;
+                    const ratio = r.width / r.height;
+                    if (ratio < 0.75 || ratio > 1.33) continue;
+                    const area = r.width * r.height;
+                    if (area > bestArea) { bestArea = area; best = {el: img, r}; }
+                }
+                if (!best) return null;
+                best.el.scrollIntoView({block: 'center'});
+                const r = best.el.getBoundingClientRect();
+                const pad = 20;
+                return {
+                    x: Math.max(0, r.x - pad),
+                    y: Math.max(0, r.y - pad),
+                    width: r.width + pad * 2,
+                    height: r.height + pad * 2,
+                };
+            }""")
+        except Exception:
+            return None
+
     async def _save_auth_screenshot(self, result: dict) -> None:
-        """把含认证二维码的整页截图存到 static/publish_auth/，生成可经 /static/ 访问的 URL。"""
+        """把认证二维码截图存到 static/publish_auth/，生成可经 /static/ 访问的 URL。
+
+        优先裁出二维码本体；定位不到二维码区域时退化为整页截图。
+        """
         try:
             from app.core.paths import get_upload_path
             auth_dir = Path(get_upload_path("publish_auth"))
             filename = f"publish-auth-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
             filepath = auth_dir / filename
-            await self.page.screenshot(path=str(filepath), full_page=True)
+            clip = await self._locate_auth_qr_bbox()
+            await self.page.screenshot(path=str(filepath), clip=clip) if clip \
+                else await self.page.screenshot(path=str(filepath), full_page=True)
             result["auth_qr_url"] = f"/static/uploads/publish_auth/{filename}"
-            logger.warning(f"   二维码截图: {filepath}")
+            logger.warning(f"   二维码截图: {filepath}（{'裁剪' if clip else '整页'}）")
         except Exception as exc:
             logger.error(f"保存认证二维码截图失败: {exc}")
 
