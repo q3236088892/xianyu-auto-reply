@@ -174,5 +174,8 @@ def load_account_proxy_fields(account_id: str) -> Dict[str, Any]:
             "proxy_pass": row.proxy_pass or None,
         }
     except Exception as e:
-        logger.warning(f"【{account_id}】浏览器代理: 查询失败, 用默认直连: {e}")
-        return empty
+        # fail-closed：查库失败时不允许退回默认直连——账号是否应走代理是安全决策，
+        # 宁可让浏览器启动失败（上层重试）也不能在配置不可知时静默直连。
+        raise ProxyConfigError(
+            f"【{account_id}】浏览器代理: 查询失败(fail-closed，禁止按直连处理): {e}"
+        ) from e

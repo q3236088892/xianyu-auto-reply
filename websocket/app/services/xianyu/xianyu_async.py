@@ -230,12 +230,17 @@ class XianyuAsync:
             return None
     
     def _load_proxy_config(self) -> dict:
-        """从数据库加载代理配置"""
+        """从数据库加载代理配置。
+
+        fail-closed：读取失败时抛出而不是退回默认直连配置——账号是否应走代理
+        是安全决策，宁可断线重试也不能在配置不可知时静默直连（IP 劈叉触发风控）。
+        """
+        from common.services.proxy_factory import ProxyConfigError
         try:
             from common.db.compat import db_manager
-            proxy_config = db_manager.get_cookie_proxy_config(self.cookie_id) or self._default_proxy_config()
+            proxy_config = db_manager.get_cookie_proxy_config(self.cookie_id)
             if not isinstance(proxy_config, dict):
-                proxy_config = self._default_proxy_config()
+                raise ValueError(f"代理配置不是字典: {type(proxy_config)}")
             proxy_type = proxy_config.get('proxy_type', 'none')
             if proxy_type and proxy_type != 'none':
                 logger.info(f"【{self.cookie_id}】加载代理配置: {proxy_type}://{proxy_config.get('proxy_host')}:{proxy_config.get('proxy_port')}")
@@ -243,8 +248,9 @@ class XianyuAsync:
                 logger.info(f"【{self.cookie_id}】未配置代理")
             return proxy_config
         except Exception as e:
-            logger.warning(f"【{self.cookie_id}】加载代理配置失败: {e}")
-            return self._default_proxy_config()
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】加载代理配置失败(fail-closed，禁止按直连处理): {e}"
+            ) from e
     
     def _get_proxy_url(self) -> Optional[str]:
         """根据 self.proxy_config 拼代理 URL（HTTP 出站 + WebSocket 共用）
@@ -256,6 +262,10 @@ class XianyuAsync:
         Returns:
             形如 'http://host:port'、'socks5://user:pass@host:port' 的代理 URL；
             未配置代理时返回 None（调用方应走直连）。
+
+        Raises:
+            ProxyConfigError: fail-closed，已配置代理类型但缺 host/port 时抛出，
+                禁止静默按直连处理。
         """
         proxy_type = self.proxy_config.get('proxy_type', 'none')
         if proxy_type == 'none':
@@ -267,7 +277,11 @@ class XianyuAsync:
         password = self.proxy_config.get('proxy_pass')
 
         if not host or not port:
-            return None
+            from common.services.proxy_factory import ProxyConfigError
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】已配置 {proxy_type} 代理但缺 host/port"
+                "(fail-closed，禁止直连)"
+            )
 
         if user and password:
             return f"{proxy_type}://{user}:{password}@{host}:{port}"
@@ -328,49 +342,57 @@ class XianyuAsync:
             return None
 
         api_url = config['api_url']
+        # fail-closed：管理员已启用系统代理（proxy.enabled=true），获取失败绝不降级直连。
+        # 区分两类错误：
+        # - 连通性/供应商临时故障(超时、非200、空响应) → ConnectionError，
+        #   走网络错误退避重试（不会禁用账号），代理恢复后自动连上；
+        # - 配置/协议错误(格式、端口) → ProxyConfigError，停连告警，需人工修复。
+        from common.services.proxy_factory import ProxyConfigError
+
+        def _fail_retry(reason: str):
+            raise ConnectionError(f"系统代理 API 暂不可用: {reason}(fail-closed，禁止直连)")
+
+        def _fail_config(reason: str):
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】系统代理 API 配置/协议错误: {reason}"
+                "(fail-closed，禁止直连，需人工修复)"
+            )
+
         try:
             import aiohttp
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(api_url) as resp:
                     if resp.status != 200:
-                        logger.warning(
-                            f"【{self.cookie_id}】代理 API 返回状态码 {resp.status}，本次直连"
-                        )
-                        return None
+                        _fail_retry(f"状态码 {resp.status}")
                     text = (await resp.text() or '').strip()
 
             if not text:
-                logger.warning(f"【{self.cookie_id}】代理 API 返回内容为空，本次直连")
-                return None
+                _fail_retry("返回内容为空")
 
             # 取第一非空行（兼容多行返回的代理供应商）
             first_line = next((line.strip() for line in text.splitlines() if line.strip()), '')
             if not first_line:
-                return None
+                _fail_retry("无非空行")
 
             # 严格解析 host:port，避免代理供应商误返回 HTML/JSON 等被错误使用
             import re
             m = re.match(r'^([^\s:]+):(\d{1,5})$', first_line)
             if not m:
-                logger.warning(
-                    f"【{self.cookie_id}】代理 API 返回格式无法解析: {first_line!r}，本次直连"
-                )
-                return None
+                _fail_config(f"格式无法解析: {first_line!r}")
             host = m.group(1)
             port = int(m.group(2))
             if not (1 <= port <= 65535):
-                logger.warning(f"【{self.cookie_id}】代理端口非法: {port}，本次直连")
-                return None
+                _fail_config(f"端口非法: {port}")
 
             logger.info(f"【{self.cookie_id}】系统代理 API 获取成功: http://{host}:{port}")
             return (host, port)
+        except (ProxyConfigError, ConnectionError):
+            raise
         except asyncio.TimeoutError:
-            logger.warning(f"【{self.cookie_id}】代理 API 调用超时（10s），本次直连")
-            return None
+            _fail_retry("调用超时（10s）")
         except Exception as e:
-            logger.warning(f"【{self.cookie_id}】代理 API 调用异常: {e}，本次直连")
-            return None
+            _fail_retry(f"调用异常: {e}")
     
     async def _interruptible_sleep(self, duration: float):
         """可中断的sleep"""
@@ -430,10 +452,15 @@ class XianyuAsync:
         if proxy_type == 'none':
             return aiohttp.TCPConnector(limit=100, limit_per_host=30)
 
+        from common.services.proxy_factory import ProxyConfigError
         host = self.proxy_config.get('proxy_host')
         port = self.proxy_config.get('proxy_port')
         if not host or not port:
-            return aiohttp.TCPConnector(limit=100, limit_per_host=30)
+            # fail-closed: 已配置代理类型但缺关键字段，禁止回退直连
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】已配置 {proxy_type} 代理但缺 host/port"
+                "(fail-closed，禁止直连)"
+            )
 
         try:
             from aiohttp_socks import ProxyConnector, ProxyType
@@ -444,8 +471,9 @@ class XianyuAsync:
             elif proxy_type in ('http', 'https'):
                 socks_type = ProxyType.HTTP
             else:
-                logger.warning(f"【{self.cookie_id}】未知代理类型: {proxy_type}，回退直连")
-                return aiohttp.TCPConnector(limit=100, limit_per_host=30)
+                raise ProxyConfigError(
+                    f"【{self.cookie_id}】未知代理类型: {proxy_type}(fail-closed，禁止直连)"
+                )
 
             connector = ProxyConnector(
                 proxy_type=socks_type,
@@ -457,12 +485,17 @@ class XianyuAsync:
             )
             logger.info(f"【{self.cookie_id}】HTTP Session 走代理: {proxy_type}://{host}:{port}")
             return connector
-        except ImportError:
-            logger.error(f"【{self.cookie_id}】aiohttp-socks 未安装，HTTP 代理无法生效，回退直连")
-            return aiohttp.TCPConnector(limit=100, limit_per_host=30)
+        except ImportError as e:
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】已配置代理但缺少 aiohttp-socks 依赖"
+                "(fail-closed，禁止直连，需人工安装依赖)"
+            ) from e
+        except ProxyConfigError:
+            raise
         except Exception as e:
-            logger.error(f"【{self.cookie_id}】构造代理 connector 失败: {e}，回退直连")
-            return aiohttp.TCPConnector(limit=100, limit_per_host=30)
+            raise ProxyConfigError(
+                f"【{self.cookie_id}】构造代理 connector 失败(fail-closed，禁止直连): {e}"
+            ) from e
 
     async def create_session(self):
         """创建aiohttp session（按当前 proxy_config 接入代理）"""
@@ -2616,9 +2649,8 @@ class XianyuAsync:
 
                     # 账号级代理未配置时，尝试使用系统级代理（来自 xy_system_settings.proxy.*）
                     # 优先级：账号代理（xy_account.proxy_type 非 none）> 系统代理 API > 直连
-                    # 失败兜底：API 调用失败时保持 'none'，走直连让重连机制自愈
-                    # 注意：_fetch_system_proxy_endpoint 内部会再次校验 proxy.enabled，
-                    # 总开关关闭时直接返回 None，无需在此重复判断
+                    # fail-closed：proxy.enabled=true 但 API 获取失败时 _fetch_system_proxy_endpoint
+                    # 抛 ProxyConfigError，中止本轮连接由重连循环退避重试，禁止降级直连
                     if self.proxy_config.get('proxy_type', 'none') == 'none':
                         system_proxy = await self._fetch_system_proxy_endpoint()
                         if system_proxy:
@@ -2865,6 +2897,7 @@ class XianyuAsync:
                         'ConnectionClosed' in error_type or
                         'no close frame received or sent' in error_msg or
                         'ConnectionResetError' in error_type or
+                        'ConnectionError' in error_type or
                         'TimeoutError' in error_type or
                         'connection reset' in error_msg.lower()
                     )

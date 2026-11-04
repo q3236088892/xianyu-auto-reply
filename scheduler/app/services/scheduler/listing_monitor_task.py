@@ -342,7 +342,7 @@ class ListingMonitorTaskService:
         else:
             price_min = float(task.price_min) if task.price_min is not None else None
             price_max = float(task.price_max) if task.price_max is not None else None
-            # 任务配置了代理API地址时，取一个HTTP代理供本次采集使用（失败则直连）
+            # 任务配置了代理API地址时，取一个HTTP代理供本次采集使用（fail-closed：获取失败则本轮任务中止，禁止直连）
             task_proxy = await fetch_proxy_from_api(task.proxy_url, account_id=str(task.id)) if task.proxy_url else None
             working_idx = 0
             page_failed = False

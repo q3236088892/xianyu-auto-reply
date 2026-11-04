@@ -63,46 +63,50 @@ _MAX_ATTEMPTS = 3
 
 
 async def fetch_proxy_from_api(api_url: str, account_id: str = "") -> Optional[str]:
-    """调用代理 API 获取一个 HTTP 代理，返回 'http://host:port'，失败返回 None（直连）。
+    """调用代理 API 获取一个 HTTP 代理，返回 'http://host:port'。
 
     参照系统设置中的代理使用方式：GET api_url，响应为纯文本 IP:PORT（多行时取第一非空行），
-    严格解析 host:port 后拼成 http 代理 URL。失败（非200/空/格式异常/超时）统一返回 None。
+    严格解析 host:port 后拼成 http 代理 URL。
+
+    fail-closed：任务/调用方已决定使用代理（传入了 api_url），获取失败一律抛
+    ConnectionError，由调用方决定重试或中止，禁止静默降级直连（IP 劈叉触发风控）。
+    未传 api_url 返回 None（调用方本就未启用代理）。
     """
     if not api_url:
         return None
+
+    def _fail(reason: str):
+        raise ConnectionError(f"【{account_id}】代理API获取失败: {reason}(fail-closed，禁止直连)")
+
     try:
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(api_url) as resp:
                 if resp.status != 200:
-                    logger.warning(f"【{account_id}】代理API返回状态码 {resp.status}，本次直连")
-                    return None
+                    _fail(f"返回状态码 {resp.status}")
                 text = (await resp.text() or "").strip()
         if not text:
-            logger.warning(f"【{account_id}】代理API返回内容为空，本次直连")
-            return None
+            _fail("返回内容为空")
         # 取第一非空行（兼容多行返回的代理供应商）
         first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
         if not first_line:
-            return None
+            _fail("无非空行")
         # 严格解析 host:port，避免误返回 HTML/JSON 被错误使用
         matched = re.match(r"^([^\s:]+):(\d{1,5})$", first_line)
         if not matched:
-            logger.warning(f"【{account_id}】代理API返回格式无法解析: {first_line!r}，本次直连")
-            return None
+            _fail(f"返回格式无法解析: {first_line!r}")
         host = matched.group(1)
         port = int(matched.group(2))
         if not (1 <= port <= 65535):
-            logger.warning(f"【{account_id}】代理端口非法: {port}，本次直连")
-            return None
+            _fail(f"端口非法: {port}")
         logger.info(f"【{account_id}】代理API获取成功: http://{host}:{port}")
         return f"http://{host}:{port}"
+    except ConnectionError:
+        raise
     except asyncio.TimeoutError:
-        logger.warning(f"【{account_id}】代理API调用超时（10s），本次直连")
-        return None
+        _fail("调用超时（10s）")
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"【{account_id}】代理API调用异常: {exc}，本次直连")
-        return None
+        _fail(f"调用异常: {exc}")
 
 
 async def mtop_call(

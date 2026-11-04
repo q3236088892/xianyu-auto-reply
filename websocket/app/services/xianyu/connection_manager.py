@@ -167,6 +167,7 @@ class ConnectionManager:
                 # 可以直接传给websockets.connect(sock=...)，SSL由websockets自动处理
                 from python_socks.async_.asyncio import Proxy
                 from python_socks import ProxyType as SocksProxyType
+                from common.services.proxy_factory import ProxyConfigError
                 
                 # 确定代理类型
                 if proxy_type == 'socks5':
@@ -176,7 +177,8 @@ class ConnectionManager:
                 elif proxy_type in ['http', 'https']:
                     socks_type = SocksProxyType.HTTP
                 else:
-                    socks_type = None
+                    # fail-closed: 已配置代理但类型无法识别，禁止直连
+                    raise ValueError(f"未知的代理类型(fail-closed，禁止直连): {proxy_type}")
                 
                 if socks_type:
                     # 解析WebSocket URL获取目标主机和端口
@@ -202,14 +204,17 @@ class ConnectionManager:
                     
                     logger.info(f"【{self.cookie_id}】代理连接建立成功")
                     
-            except ImportError:
-                logger.warning(f"【{self.cookie_id}】代理连接需要安装 python-socks: pip install python-socks[asyncio]")
-                logger.warning(f"【{self.cookie_id}】将尝试不使用代理进行WebSocket连接")
-                proxy_sock = None
+            except ImportError as e:
+                raise ProxyConfigError(
+                    f"【{self.cookie_id}】账号已配置代理但缺少 python-socks 依赖，"
+                    "禁止降级直连（fail-closed，需人工安装依赖）"
+                ) from e
             except Exception as e:
-                logger.error(f"【{self.cookie_id}】通过代理建立连接失败: {str(e)}")
-                logger.warning(f"【{self.cookie_id}】将尝试不使用代理进行WebSocket连接")
-                proxy_sock = None
+                # fail-closed: 已配置代理的账号绝不允许静默降级直连
+                # （IP 劈叉是触发风控的典型原因）。抛出后由上层重连循环
+                # 按退避节奏重试，直到代理恢复。
+                logger.error(f"【{self.cookie_id}】通过代理建立连接失败，连接中止(不降级直连): {str(e)}")
+                raise ConnectionError(f"代理连接失败(fail-closed，禁止直连): {e}") from e
 
         try:
             # 尝试使用extra_headers参数

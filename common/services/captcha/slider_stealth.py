@@ -330,7 +330,11 @@ class PlaywrightSliderService:
             except ProxyConfigError:
                 raise
             except Exception as proxy_e:
-                logger.warning(f"【{self.pure_user_id}】代理配置异常, 本机直连: {proxy_e}")
+                # fail-closed: 代理配置读取/翻译异常时不允许静默直连
+                raise ProxyConfigError(
+                    f"【{self.pure_user_id}】滑块浏览器代理配置异常"
+                    f"(fail-closed，禁止直连): {proxy_e}"
+                ) from proxy_e
             if proxy_dict:
                 logger.info(f"【{self.pure_user_id}】滑块浏览器走代理 {proxy_dict.get('server')}")
             else:

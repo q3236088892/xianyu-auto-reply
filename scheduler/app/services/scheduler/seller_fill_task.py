@@ -102,7 +102,7 @@ class SellerFillTaskService:
                                 f"【{self.task_name}】任务 {task_id} 所有可用账号均在风控冷却期，本次跳过补全"
                             )
                     task_accounts_cache[task_id] = accounts
-                    # 任务配置了代理API地址时，取一个HTTP代理供本任务本轮使用（失败则直连）
+                    # 任务配置了代理API地址时，取一个HTTP代理供本任务本轮使用（fail-closed：获取失败则本轮任务中止，禁止直连）
                     task_proxy_cache[task_id] = (
                         await fetch_proxy_from_api(proxy_api, account_id=str(task_id)) if proxy_api else None
                     )

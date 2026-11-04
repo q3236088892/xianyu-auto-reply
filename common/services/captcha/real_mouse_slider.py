@@ -505,7 +505,12 @@ class _RealMouseSolver:
             self._release_browser_lock()
             raise
         except Exception as proxy_e:
-            logger.warning(f"【{self.pure_id}】真实鼠标代理配置异常, 本机直连: {proxy_e}")
+            # fail-closed: 代理配置读取/翻译异常时不允许静默直连
+            self._release_browser_lock()
+            raise ProxyConfigError(
+                f"【{self.pure_id}】真实鼠标滑块代理配置异常"
+                f"(fail-closed，禁止直连): {proxy_e}"
+            ) from proxy_e
         launch_args = list(_BROWSER_ARGS) + webrtc_policy_args()
         if proxy_dict:
             logger.info(f"【{self.pure_id}】真实鼠标滑块走代理 {proxy_dict.get('server')}")
