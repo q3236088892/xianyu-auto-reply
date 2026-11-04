@@ -33,10 +33,13 @@ async def publish_single_item(
     cookie: str,
     static_root: str | Path | None = None,
     on_auth_wait: Callable[[str], Awaitable[None]] | None = None,
+    proxy: dict | None = None,
 ) -> dict:
     """使用共享发布器执行一次单品发布。
 
     on_auth_wait: 检测到发布风控认证弹窗时以二维码URL调用（可空）。
+    proxy: Playwright launch 的 proxy dict（可空=直连）。账号已配置代理时
+           上层应基于 xy_accounts.proxy_* 构建后传入。
     """
     publisher = create_xianyu_publisher(static_root=static_root)
     return await publisher.publish_item(
@@ -45,4 +48,5 @@ async def publish_single_item(
         reuse_browser=False,
         should_close=True,
         on_auth_wait=on_auth_wait,
+        proxy=proxy,
     )

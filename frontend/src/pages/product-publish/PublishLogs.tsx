@@ -30,6 +30,15 @@ const ADDRESS_SOURCE_CONFIG: Record<string, { label: string; cls: string }> = {
   personal_pool: { label: '个人随机', cls: 'badge-primary' },
 }
 
+// 发布风控认证等待：error_message 内嵌的二维码截图路径
+const AUTH_QR_RE = /(\/static\/uploads\/publish_auth\/[\w.-]+)/
+
+const extractAuthQr = (log: PublishLog): string | null => {
+  if (log.status !== 'publishing' || !log.error_message) return null
+  const m = log.error_message.match(AUTH_QR_RE)
+  return m ? m[1] : null
+}
+
 export function PublishLogs() {
   const { addToast } = useUIStore()
   const { user } = useAuthStore()
@@ -46,9 +55,11 @@ export function PublishLogs() {
   const [filterStatus, setFilterStatus] = useState('')
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearing, setClearing] = useState(false)
+  // 认证二维码弹窗：用户手动关闭的日志 id（该日志状态翻篇或换新二维码时重置）
+  const [dismissedAuthLogId, setDismissedAuthLogId] = useState<number | null>(null)
 
-  const load = async (p = page, size = pageSize, account = filterAccount, status = filterStatus) => {
-    setTableLoading(true)
+  const load = async (p = page, size = pageSize, account = filterAccount, status = filterStatus, silent = false) => {
+    if (!silent) setTableLoading(true)
     try {
       const res = await getPublishLogs(p, size, account || undefined, status || undefined)
       if (res.success) {
@@ -71,6 +82,26 @@ export function PublishLogs() {
   }, [])
 
   useEffect(() => { load(page, pageSize) }, [page, pageSize])
+
+  // 发布中轮询：页面内有「发布中」日志（或筛选即发布中）时每4秒静默刷新，
+  // 让风控认证提示、发布结果无需手动刷新即可出现
+  const hasPublishing = logs.some(l => l.status === 'publishing')
+  useEffect(() => {
+    if (!(hasPublishing || filterStatus === 'publishing')) return
+    const timer = setInterval(
+      () => { load(page, pageSize, filterAccount, filterStatus, true) },
+      4000,
+    )
+    return () => clearInterval(timer)
+  }, [hasPublishing, filterStatus, page, pageSize, filterAccount])
+
+  // 认证二维码弹窗数据源：发布中且 error_message 内嵌 publish_auth 二维码的日志
+  const authLog = logs.find(l => extractAuthQr(l) !== null) ?? null
+  const authQrUrl = authLog ? extractAuthQr(authLog) : null
+  const authLogId = authLog?.id ?? null
+  // 新日志出现（或状态翻篇后再次出现）时，重置手动关闭状态
+  useEffect(() => { setDismissedAuthLogId(null) }, [authLogId])
+  const showAuthModal = Boolean(authLog && authQrUrl && dismissedAuthLogId !== authLog.id)
 
   // 点击「查询」：用当前筛选值从第一页加载
   const handleSearch = () => {
@@ -255,6 +286,18 @@ export function PublishLogs() {
                           className="flex items-center gap-1 text-sm text-blue-500 hover:underline">
                           <ExternalLink className="w-3 h-3" />查看商品
                         </a>
+                      ) : extractAuthQr(log) ? (
+                        <div className="space-y-1">
+                          <span className="text-xs text-amber-600 truncate block" title={log.error_message ?? ''}>
+                            等待扫码认证
+                          </span>
+                          <button
+                            onClick={() => setDismissedAuthLogId(null)}
+                            className="text-xs text-blue-500 hover:underline whitespace-nowrap"
+                          >
+                            打开二维码
+                          </button>
+                        </div>
                       ) : log.error_message ? (
                         <span className="text-xs text-red-500 truncate block" title={log.error_message}>
                           {log.error_message}
@@ -301,6 +344,39 @@ export function PublishLogs() {
           </div>
         )}
       </motion.div>
+
+      {showAuthModal && authLog && authQrUrl && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-sm w-full p-6 text-center">
+            <h3 className="text-lg font-semibold mb-1">扫码完成认证</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+              账号 {accounts.find((a: any) => a.id === authLog.account_id)?.note || authLog.account_id}
+              {authLog.title ? ` · ${authLog.title}` : ''}
+            </p>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+              闲鱼风控要求「完成认证才可继续发布」，请用闲鱼App扫描下方二维码。
+              系统最长等待10分钟，认证后发布将自动继续。
+            </p>
+            <div className="flex justify-center mb-4">
+              <img
+                src={authQrUrl}
+                alt="认证二维码"
+                className="w-56 h-56 object-contain border border-slate-200 dark:border-slate-600 rounded-lg"
+              />
+            </div>
+            <p className="text-xs text-slate-400 mb-4 flex items-center justify-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              等待认证中，完成后此弹窗将自动关闭…
+            </p>
+            <button
+              onClick={() => setDismissedAuthLogId(authLog.id)}
+              className="btn-ios-secondary"
+            >
+              暂时关闭
+            </button>
+          </div>
+        </div>
+      )}
 
       {showClearConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

@@ -24,6 +24,7 @@ from loguru import logger
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from common.utils.browser_utils import ensure_playwright_browser_path, get_chromium_executable_path
 from common.services.publish_image_service import cleanup_temp_images, download_remote_image
+from common.services.proxy_factory import webrtc_policy_args
 
 
 class XianyuPublisher:
@@ -75,12 +76,15 @@ class XianyuPublisher:
         cleanup_temp_images(self.temp_image_paths)
         self.temp_image_paths = []
 
-    async def initialize(self, headless: bool = True, force_reinit: bool = False):
+    async def initialize(self, headless: bool = True, force_reinit: bool = False,
+                         proxy: Optional[dict] = None):
         """初始化浏览器（增强反检测）
-        
+
         Args:
             headless: 是否使用无头模式
             force_reinit: 是否强制重新初始化（即使已经初始化）
+            proxy: Playwright launch 的 proxy dict（如 {"server": "socks5://host:port"}），
+                   None 表示直连。账号已配置代理时上层必须传入，防止登录IP与行为IP不一致。
         """
         if self.is_initialized and not force_reinit:
             logger.info("✅ 浏览器已初始化，复用现有实例")
@@ -107,6 +111,10 @@ class XianyuPublisher:
             "--window-size=1920,1080",
             "--start-maximized",
         ]
+        # 封堵 WebRTC 暴露本机网卡 IP（与 slider_stealth/real_mouse 启动点保持一致）
+        browser_args.extend(webrtc_policy_args())
+        if proxy:
+            logger.info(f"🌐 发布浏览器走代理: {proxy.get('server')}")
 
         chromium_path = get_chromium_executable_path()
 
@@ -117,6 +125,8 @@ class XianyuPublisher:
         )
         if chromium_path:
             launch_kwargs["executable_path"] = chromium_path
+        if proxy:
+            launch_kwargs["proxy"] = proxy
 
         self.browser = await self.playwright.chromium.launch(**launch_kwargs)
 
@@ -197,10 +207,13 @@ class XianyuPublisher:
         reuse_browser: bool = False,
         should_close: bool = True,
         on_auth_wait: Optional[Callable[[str], Awaitable[None]]] = None,
+        proxy: Optional[dict] = None,
     ) -> dict:
         """发布商品到闲鱼（按原项目完整流程迁回）
 
         on_auth_wait: 可选异步回调，检测到发布风控认证弹窗时以二维码URL调用之。
+        proxy: Playwright launch 的 proxy dict；仅在新建浏览器时生效（复用已有浏览器时
+               代理已于初始化时绑定）。
         """
         result = {
             "success": False,
@@ -225,7 +238,7 @@ class XianyuPublisher:
                 logger.info("🔄 复用现有浏览器，重新创建页面...")
                 await self.reinitialize_page()
             else:
-                await self.initialize(headless=headless)
+                await self.initialize(headless=headless, proxy=proxy)
 
             if not (reuse_browser and self.is_initialized and self.current_cookie == cookie_data["cookie"]):
                 await self.set_cookies(cookie_data["cookie"])

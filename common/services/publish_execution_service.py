@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.models.xy_account import XYAccount
 from common.services.item_service import ItemService
+from common.services.proxy_factory import playwright_proxy, require_proxy
 from common.services.publish_address_service import PublishAddressService
 from common.services.publish_log_service import PublishLogService
 from common.services.xianyu_publish_service import publish_single_item
@@ -35,6 +36,25 @@ async def _get_account(session: AsyncSession, account_id: str, user_id: int) -> 
     )
     result = await session.execute(stmt)
     return result.scalars().first()
+
+
+def _build_account_proxy(account: Optional[XYAccount], account_id: str) -> Optional[Dict[str, Any]]:
+    """基于账号的 proxy_* 字段构建 Playwright launch 的 proxy dict。
+
+    fail-closed：已配置代理但缺 host/port 时抛 ProxyConfigError，禁止降级直连
+    （否则登录IP与发布行为IP不一致，易触发风控）。
+    """
+    if account is None:
+        return None
+    ptype = account.proxy_type or "none"
+    require_proxy(ptype, account.proxy_host, account.proxy_port, context=f"发布账号 {account_id}")
+    return playwright_proxy(
+        ptype,
+        account.proxy_host or "",
+        int(account.proxy_port or 0),
+        account.proxy_user,
+        account.proxy_pass,
+    )
 
 
 async def _sync_account_items_after_publish(
@@ -158,6 +178,7 @@ async def execute_single_publish(
             cookie=cookies_str,
             static_root=static_root,
             on_auth_wait=_notify_auth_wait,
+            proxy=_build_account_proxy(account, account_id),
         )
     except Exception as exc:
         pub_error = exc
