@@ -71,6 +71,17 @@ export interface Account {
   disable_reason?: string
   created_at?: string
   updated_at?: string
+  // 网络身份探测（ws服务经账号代理探测的出口IP，见 metadata.net_identity）
+  net_identity?: NetIdentity | null
+}
+
+export interface NetIdentity {
+  ip?: string            // 当前出口IP
+  geo?: string           // 归属地（国家 省份 运营商）
+  checked_at?: string    // 最近探测时间
+  via_proxy?: string     // 探测时使用的代理链路（直连/类型://主机:端口）
+  sign_ip?: string       // Cookie签发锚点IP（首次使用时探测）
+  sign_at?: string       // Cookie签发时间（≈扫码登录时间）
 }
 
 export interface AccountDetail extends Account {

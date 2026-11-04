@@ -13,6 +13,8 @@ import json
 import time
 import os
 import sys
+from datetime import datetime, timezone
+
 import aiohttp
 from collections import defaultdict
 from typing import Dict, Optional
@@ -121,6 +123,7 @@ class XianyuAsync:
         self.token_refresh_task = None
         self.cleanup_task = None
         self.cookie_refresh_task = None
+        self.ip_probe_task = None
         self.background_tasks = set()
         
         # 消息处理并发控制
@@ -948,6 +951,99 @@ class XianyuAsync:
         except Exception as e:
             logger.error(f"【{self.cookie_id}】处理消息异常: {e}")
     
+    async def _ip_probe_loop(self):
+        """定期探测账号出口IP并落库(metadata.net_identity)，供账号管理页展示。
+
+        每次 connected 后由主循环启动；用账号当前代理配置发起探测，因此探测结果
+        就是 Cookie 实际请求的出口。sign_ip/sign_at 只在首次写入（作为该 Cookie
+        的签发锚点），之后仅更新 ip/geo/checked_at 反映漂移。
+        """
+        try:
+            while True:
+                await self._probe_net_identity_once()
+                await asyncio.sleep(1800)  # 30分钟复测一次
+        except asyncio.CancelledError:
+            logger.debug(f"【{self.cookie_id}】IP探测任务已取消")
+            raise
+        except Exception as e:
+            logger.debug(f"【{self.cookie_id}】IP探测循环退出: {e}")
+
+    async def _probe_net_identity_once(self):
+        """单轮出口IP探测 + metadata落库。任何失败都静默，不干扰主流程。"""
+        try:
+            from sqlalchemy import select as sqla_select
+            from sqlalchemy import update as sqla_update
+            import httpx
+            from common.db.session import async_session_maker
+            from common.models.xy_account import XYAccount
+            from common.services.proxy_factory import httpx_proxy_url
+
+            ptype = self.proxy_config.get('proxy_type', 'none')
+            proxy_url = httpx_proxy_url(
+                ptype,
+                self.proxy_config.get('proxy_host'),
+                self.proxy_config.get('proxy_port'),
+                self.proxy_config.get('proxy_user'),
+                self.proxy_config.get('proxy_pass'),
+            ) or None
+
+            probe_url = "http://ip-api.com/json/?fields=status,query,country,regionName,isp&lang=zh-CN"
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=10.0),
+                proxy=proxy_url,
+                trust_env=False,
+            ) as client:
+                resp = await client.get(probe_url)
+                data = resp.json()
+
+            if data.get("status") != "success":
+                logger.debug(f"【{self.cookie_id}】IP探测服务返回非success: {data}")
+                return
+
+            ip = str(data.get("query") or "")
+            geo = " ".join(x for x in [data.get("country"), data.get("regionName"), data.get("isp")] if x)
+            via = f"{ptype}://{self.proxy_config.get('proxy_host')}:{self.proxy_config.get('proxy_port')}" if ptype != "none" else "直连"
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+            async with async_session_maker() as session:
+                row = (
+                    await session.execute(
+                        sqla_select(XYAccount.id, XYAccount.metadata_json, XYAccount.last_login_at)
+                        .where(XYAccount.account_id == self.cookie_id)
+                        .limit(1)
+                    )
+                ).first()
+                if not row:
+                    return
+                pk, metadata_json, last_login_at = row
+                metadata = dict(metadata_json) if isinstance(metadata_json, dict) else {}
+                net_identity = dict(metadata.get("net_identity") or {})
+
+                # 签发锚点：仅首次写入（近似=该Cookie首次使用时探测到的出口）
+                if not net_identity.get("sign_ip"):
+                    net_identity["sign_ip"] = ip
+                    net_identity["sign_at"] = (
+                        last_login_at.isoformat() if last_login_at else now_iso
+                    )
+
+                net_identity["ip"] = ip
+                net_identity["geo"] = geo
+                net_identity["via_proxy"] = via
+                net_identity["checked_at"] = now_iso
+
+                metadata["net_identity"] = net_identity
+                await session.execute(
+                    sqla_update(XYAccount)
+                    .where(XYAccount.id == pk)
+                    .values(metadata_json=metadata)
+                )
+                await session.commit()
+
+            logger.info(f"【{self.cookie_id}】出口IP已更新: {ip} ({geo}) via {via}")
+        except Exception as e:
+            # 探测失败静默（代理暂时不通等），下轮再试
+            logger.debug(f"【{self.cookie_id}】IP探测失败: {e}")
+
     async def pause_cleanup_loop(self):
         """定期清理过期的暂停记录、锁和缓存（防止内存泄漏）"""
         try:
@@ -2407,6 +2503,9 @@ class XianyuAsync:
         
         if self.cookie_refresh_task and not self.cookie_refresh_task.done():
             tasks_to_cancel.append(('Cookie刷新', self.cookie_refresh_task))
+
+        if self.ip_probe_task and not self.ip_probe_task.done():
+            tasks_to_cancel.append(('IP探测', self.ip_probe_task))
         
         if tasks_to_cancel:
             logger.info(f"【{self.cookie_id}】准备取消 {len(tasks_to_cancel)} 个后台任务...")
@@ -2695,6 +2794,12 @@ class XianyuAsync:
                                 )
                             else:
                                 logger.info(f"【{self.cookie_id}】Cookie刷新任务已在运行，跳过启动")
+
+                            # 启动IP探测任务(记录账号出口IP/Cookie签发锚点到metadata, 供前端展示)
+                            if not self.ip_probe_task or self.ip_probe_task.done():
+                                self.ip_probe_task = asyncio.create_task(
+                                    self._ip_probe_loop()
+                                )
                             
                             logger.info(f"【{self.cookie_id}】所有后台任务已启动")
                             logger.info(f"【{self.cookie_id}】开始监听WebSocket消息...")

@@ -333,12 +333,14 @@ async def list_cookie_details_paginated(
     details = []
     for account in accounts:
         ai_settings = (account.metadata_json or {}).get("ai_reply_settings") or {}
+        net_identity = (account.metadata_json or {}).get("net_identity") or {}
         details.append({
             "pk": account.id,  # 数据库主键
             "id": account.account_id,
             "value": account.cookie or "",
             "enabled": _status_to_enabled(account.status),
             "online": account.account_id in online_ids,
+            "net_identity": net_identity,
             "auto_confirm": bool(account.auto_confirm),
             "scheduled_redelivery": bool(account.scheduled_redelivery),
             "scheduled_rate": bool(account.scheduled_rate),

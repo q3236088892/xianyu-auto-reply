@@ -63,6 +63,7 @@ export const getAccountDetailsPaginated = async (
     value: string
     enabled: boolean
     online?: boolean
+    net_identity?: import('@/types').NetIdentity | null
     auto_confirm: boolean
     scheduled_redelivery?: boolean
     scheduled_rate?: boolean
@@ -139,6 +140,7 @@ export const getAccountDetailsPaginated = async (
       cookie: item.value,
       enabled: item.enabled,
       online: item.online ?? false,
+      net_identity: item.net_identity || null,
       auto_confirm: item.auto_confirm,
       scheduled_redelivery: item.scheduled_redelivery || false,
       scheduled_rate: item.scheduled_rate || false,

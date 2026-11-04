@@ -2397,14 +2397,33 @@ export function Accounts() {
                       </div>
                     </td>
                     <td>
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded ${
-                        account.online
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-                      }`}>
-                        <span className={`status-dot ${account.online ? 'status-dot-success' : 'status-dot-danger'}`} />
-                        {account.online ? '在线' : '离线'}
-                      </span>
+                      <div
+                        className="flex flex-col items-start gap-0.5"
+                        title={
+                          account.net_identity?.ip
+                            ? [
+                                `出口IP: ${account.net_identity.ip}${account.net_identity.geo ? ` (${account.net_identity.geo})` : ''}`,
+                                `链路: ${account.net_identity.via_proxy || '未知'}`,
+                                `探测: ${account.net_identity.checked_at ? new Date(account.net_identity.checked_at).toLocaleString('zh-CN') : '未知'}`,
+                                account.net_identity.sign_ip ? `Cookie签发IP: ${account.net_identity.sign_ip}${account.net_identity.sign_at ? ` (${new Date(account.net_identity.sign_at).toLocaleString('zh-CN')})` : ''}` : null,
+                              ].filter(Boolean).join('\n')
+                            : undefined
+                        }
+                      >
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded ${
+                          account.online
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                        }`}>
+                          <span className={`status-dot ${account.online ? 'status-dot-success' : 'status-dot-danger'}`} />
+                          {account.online ? '在线' : '离线'}
+                        </span>
+                        {account.net_identity?.ip && (
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono pl-1">
+                            {account.net_identity.ip}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded ${
