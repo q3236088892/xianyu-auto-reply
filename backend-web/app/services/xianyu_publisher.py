@@ -246,20 +246,22 @@ class XianyuPublisher:
             await self.set_cookies(cookie_data["cookie"])
 
             logger.info("\n[步骤1] 🌐 先访问闲鱼首页，触发Cookie初始化...")
-            await self.page.goto("https://www.goofish.com", wait_until="networkidle", timeout=30000)
+            await self.page.goto("https://www.goofish.com", wait_until="domcontentloaded", timeout=90000)
             await asyncio.sleep(1)
 
             logger.info("\n[步骤2] 🌐 访问登录页面...")
             await self.page.goto(
                 "https://login.taobao.com/member/login.jhtml",
                 wait_until="domcontentloaded",
-                timeout=30000,
+                timeout=90000,
             )
             await asyncio.sleep(1)
 
             publish_url = "https://www.goofish.com/publish?spm=a21ybx.item.sidebar.1.297e3da6aDZAmV"
             logger.info(f"\n[步骤3] 🌐 访问发布页面: {publish_url}")
-            await self.page.goto(publish_url, wait_until="networkidle", timeout=60000)
+            # 代理出口为住宅宽带时整页加载很慢：domcontentloaded + 长超时，
+            # networkidle 等不到（常驻长连接），30-60s 必超时
+            await self.page.goto(publish_url, wait_until="domcontentloaded", timeout=120000)
             await asyncio.sleep(3)
 
             current_url = self.page.url

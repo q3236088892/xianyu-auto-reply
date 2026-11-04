@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 from typing import Optional
 
 from loguru import logger
@@ -90,15 +91,22 @@ class Socks5AuthRelay:
             return
         atyp = req[3]
         if atyp == 1:
-            addr = await reader.readexactly(4)
+            raw_addr = await reader.readexactly(4)
+            addr = raw_addr
+            target = ".".join(str(b) for b in raw_addr)
         elif atyp == 3:
             ln = (await reader.readexactly(1))[0]
-            addr = bytes([ln]) + await reader.readexactly(ln)
+            raw_addr = await reader.readexactly(ln)
+            addr = bytes([ln]) + raw_addr
+            target = raw_addr.decode("utf-8", "replace")
         elif atyp == 4:
-            addr = await reader.readexactly(16)
+            raw_addr = await reader.readexactly(16)
+            addr = raw_addr
+            target = str(ipaddress.IPv6Address(raw_addr))
         else:
             raise ValueError(f"未知 ATYP: {atyp}")
-        port = await reader.readexactly(2)
+        port = int.from_bytes(await reader.readexactly(2), "big")
+        target = f"{target}:{port}"
 
         # 3) 连上游并完成带认证问候
         up_reader, up_writer = await asyncio.open_connection(
@@ -125,7 +133,7 @@ class Socks5AuthRelay:
                     raise ValueError(f"上游不接受任何认证方式: {method}")
 
                 # 4) 透传 connect 请求并回读结果
-                up_writer.write(b"\x05\x01\x00" + bytes([atyp]) + addr + port)
+                up_writer.write(b"\x05\x01\x00" + bytes([atyp]) + addr + port.to_bytes(2, "big"))
                 await up_writer.drain()
                 up_resp = await up_reader.readexactly(4)
                 rep = up_resp[1]
@@ -137,15 +145,16 @@ class Socks5AuthRelay:
                     await up_reader.readexactly(ln + 2)
                 elif up_atyp == 4:
                     await up_reader.readexactly(16 + 2)
-            except (PermissionError, ConnectionError, ValueError, asyncio.IncompleteReadError):
+            except (PermissionError, ConnectionError, ValueError, asyncio.IncompleteReadError) as up_exc:
                 # 认证失败/上游拒连：给客户端回通用失败 REP，再抛给上层记日志
+                logger.warning(f"SOCKS5 中继目标 {target} 握手失败: {up_exc}")
                 writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 await writer.drain()
                 raise
             writer.write(b"\x05" + bytes([rep]) + b"\x00\x01\x00\x00\x00\x00\x00\x00")
             await writer.drain()
             if rep != 0:
-                raise ConnectionError(f"上游代理连接目标失败, REP={rep}")
+                raise ConnectionError(f"上游代理连接目标 {target} 失败, REP={rep}")
 
             # 5) 双向桥接
             await self._pipe(reader, writer, up_reader, up_writer)
