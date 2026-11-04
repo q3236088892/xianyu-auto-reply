@@ -49,15 +49,25 @@ class Socks5AuthRelay:
         return {"server": f"socks5://127.0.0.1:{self.port}"}
 
     async def close(self) -> None:
+        # 顺序很关键：Python 3.12+ Server.wait_closed() 会等待所有现存连接结束，
+        # 必须先停接受新连接 → 取消所有客户端任务 → 最后才 wait_closed（且带超时），
+        # 否则浏览器留下的悬挂连接会让 close() 卡死（生产事故实锤）。
         if self._server:
             self._server.close()
-            with contextlib.suppress(Exception):
-                await self._server.wait_closed()
         for task in list(self._client_tasks):
             task.cancel()
         if self._client_tasks:
-            await asyncio.gather(*self._client_tasks, return_exceptions=True)
+            # 各客户端 task 的 finally 会等待底层连接关闭，个别传输层句柄可能
+            # 永不完成（浏览器已退出但代理侧连接悬挂），必须加超时防止整体卡死
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(
+                    asyncio.gather(*self._client_tasks, return_exceptions=True),
+                    timeout=5,
+                )
         self._client_tasks.clear()
+        if self._server:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._server.wait_closed(), timeout=3)
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
@@ -71,8 +81,10 @@ class Socks5AuthRelay:
         finally:
             self._client_tasks.discard(task)
             writer.close()
+            # wait_closed 在 Proactor 事件循环下可能永不返回（对端悬挂），
+            # 加超时兜底，绝不阻塞 close()
             with contextlib.suppress(Exception):
-                await writer.wait_closed()
+                await asyncio.wait_for(writer.wait_closed(), timeout=2)
 
     async def _relay_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         # 1) 客户端问候：VER=5, NMETHODS, METHODS —— 只回免密
@@ -160,8 +172,9 @@ class Socks5AuthRelay:
             await self._pipe(reader, writer, up_reader, up_writer)
         finally:
             up_writer.close()
+            # 同客户端侧：Proactor 下对端悬挂时 wait_closed 可能永不返回，加超时
             with contextlib.suppress(Exception):
-                await up_writer.wait_closed()
+                await asyncio.wait_for(up_writer.wait_closed(), timeout=2)
 
     @staticmethod
     async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
