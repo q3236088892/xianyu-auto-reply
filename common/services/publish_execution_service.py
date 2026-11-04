@@ -132,17 +132,36 @@ async def execute_single_publish(
 
     result = None
     pub_error = None
+
+    from common.db.session import async_session_maker
+
+    async def _notify_auth_wait(qr_url: str) -> None:
+        """发布风控认证弹窗出现/刷新时，把二维码链接实时写进发布日志，
+        让用户在前端发布记录里直接看到并扫码，不用翻服务器日志找图。"""
+        msg = "⏳ 等待扫码认证：闲鱼风控要求「完成认证才可继续发布」"
+        if qr_url:
+            msg += f"，请打开 {qr_url} 用闲鱼App扫码"
+        msg += "（系统最长等待10分钟）"
+        try:
+            async with async_session_maker() as notify_session:
+                await PublishLogService(notify_session).update_log(
+                    log_id=log.id,
+                    status="publishing",
+                    error_message=msg,
+                )
+        except Exception as notify_exc:
+            logger.error(f"更新认证等待状态失败: {notify_exc}")
+
     try:
         result = await publish_single_item(
             item_data=publish_item_data,
             cookie=cookies_str,
             static_root=static_root,
+            on_auth_wait=_notify_auth_wait,
         )
     except Exception as exc:
         pub_error = exc
         logger.error(f"单品发布异常: {exc}")
-
-    from common.db.session import async_session_maker
 
     try:
         async with async_session_maker() as fresh_session:

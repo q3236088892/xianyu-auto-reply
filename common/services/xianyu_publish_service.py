@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from common.services.backend_web_loader import load_backend_web_class
 
@@ -32,12 +32,17 @@ async def publish_single_item(
     item_data: dict,
     cookie: str,
     static_root: str | Path | None = None,
+    on_auth_wait: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict:
-    """使用共享发布器执行一次单品发布。"""
+    """使用共享发布器执行一次单品发布。
+
+    on_auth_wait: 检测到发布风控认证弹窗时以二维码URL调用（可空）。
+    """
     publisher = create_xianyu_publisher(static_root=static_root)
     return await publisher.publish_item(
         item_data=item_data,
         cookie_data={"cookie": cookie},
         reuse_browser=False,
         should_close=True,
+        on_auth_wait=on_auth_wait,
     )

@@ -18,7 +18,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
@@ -48,6 +48,9 @@ class XianyuPublisher:
         self.current_cookie: Optional[str] = None
         self.temp_image_paths: list[str] = []
         self.static_root = Path(static_root) if static_root else None
+        # 发布风控认证弹窗回调（可选）：检测到「完成认证才可继续发布」时
+        # 由上层注入，用于把二维码链接写进发布日志，让用户实时看到并扫码。
+        self._on_auth_wait: Optional[Callable[[str], Awaitable[None]]] = None
 
     async def _resolve_upload_image_path(self, image_path: str) -> str:
         if re.match(r"^https?://", image_path, re.IGNORECASE):
@@ -193,8 +196,12 @@ class XianyuPublisher:
         cookie_data: dict,
         reuse_browser: bool = False,
         should_close: bool = True,
+        on_auth_wait: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> dict:
-        """发布商品到闲鱼（按原项目完整流程迁回）"""
+        """发布商品到闲鱼（按原项目完整流程迁回）
+
+        on_auth_wait: 可选异步回调，检测到发布风控认证弹窗时以二维码URL调用之。
+        """
         result = {
             "success": False,
             "message": "",
@@ -202,6 +209,7 @@ class XianyuPublisher:
             "item_id": None,
             "screenshot": None,
         }
+        self._on_auth_wait = on_auth_wait
 
         try:
             logger.info("=" * 80)
@@ -1918,93 +1926,177 @@ class XianyuPublisher:
             await publish_target.click(timeout=5000)
 
             logger.info("\n[步骤15] ⏳ 等待发布完成...")
-            logger.info("等待5秒，让发布请求处理...")
-            await asyncio.sleep(5)
+            await self._wait_publish_outcome(result)
 
-            logger.info("检查页面是否跳转...")
+        else:
+            result["message"] = '未找到发布按钮'
+            logger.error("❌ 未找到发布按钮")
+
+    # 闲鱼发布风控弹窗文案（需扫码完成实人认证后才允许继续发布）
+    _AUTH_DIALOG_KEYWORDS = ("完成认证才可继续发布",)
+    _AUTH_WAIT_MAX_SECONDS = 600    # 认证弹窗最长等待时间（10分钟）
+    _AUTH_GRACE_SECONDS = 30        # 弹窗消失后继续观察跳转的宽限期
+    _POST_CLICK_TIMEOUT = 15        # 无弹窗时点击后判定的正常窗口
+    _AUTH_NOTIFY_INTERVAL = 60      # 等待期间重复通知间隔（二维码可能刷新）
+
+    async def _safe_body_text(self) -> str:
+        """读取页面可见文本，任何异常都返回空串，避免轮询被单帧读取失败打断。"""
+        try:
+            return await self.page.evaluate('() => document.body.innerText') or ""
+        except Exception:
+            return ""
+
+    async def _save_auth_screenshot(self, result: dict) -> None:
+        """把含认证二维码的整页截图存到 static/publish_auth/，生成可经 /static/ 访问的 URL。"""
+        try:
+            from app.core.paths import get_upload_path
+            auth_dir = Path(get_upload_path("publish_auth"))
+            filename = f"publish-auth-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
+            filepath = auth_dir / filename
+            await self.page.screenshot(path=str(filepath), full_page=True)
+            result["auth_qr_url"] = f"/static/uploads/publish_auth/{filename}"
+            logger.warning(f"   二维码截图: {filepath}")
+        except Exception as exc:
+            logger.error(f"保存认证二维码截图失败: {exc}")
+
+    async def _notify_auth_wait(self, result: dict) -> None:
+        """触发上层注入的认证等待回调（通常用于把二维码链接写进发布日志）。"""
+        callback = self._on_auth_wait
+        if callback is None:
+            return
+        try:
+            await callback(result.get("auth_qr_url") or "")
+        except Exception as exc:
+            logger.error(f"认证等待回调执行失败: {exc}")
+
+    async def _wait_publish_outcome(self, result: dict) -> None:
+        """点击发布按钮后轮询等待发布结果（替代旧版固定 sleep(8) 一次性判定）。
+
+        每轮依次判定，命中即返回：
+        1. URL 跳转商品详情页 → 成功（含 item_id / 管理按钮检测）；
+        2. 页面「发布成功/已发布」或成功提示 → 成功；
+        3. 页面明确失败/错误提示 → 失败；
+        4. 「完成认证才可继续发布」风控弹窗 → 首次出现时整页截图存盘（二维码经
+           /static/uploads/publish_auth/ 可直接访问）并回调上层写发布日志，持续等
+           待用户扫码（上限 _AUTH_WAIT_MAX_SECONDS），弹窗消失后再观察 _AUTH_GRACE_SECONDS；
+        5. 全部超时 → 按「页面未跳转 / 无法确认」兜底，failure_reason 语义与旧版一致。
+        """
+        elapsed = 0
+        auth_seen = False           # 是否出现过认证弹窗
+        auth_grace_left = 0         # 弹窗消失后的剩余宽限观察期（秒）
+        auth_grace_started = False  # 宽限期是否已开始过（防重置死循环）
+        since_auth_notify = 0       # 距上次回调通知的秒数
+
+        while True:
             await asyncio.sleep(3)
+            elapsed += 3
 
-            screenshot_after = await self.page.screenshot(full_page=True)
-            result["screenshot"] = base64.b64encode(screenshot_after).decode()
+            # 每轮刷新截图：认证弹窗轮次的截图对用户扫码至关重要
+            try:
+                shot = await self.page.screenshot(full_page=True)
+                result["screenshot"] = base64.b64encode(shot).decode()
+            except Exception:
+                pass
 
             current_url = self.page.url
-            logger.info(f"当前页面URL: {current_url}")
 
-            page_text = await self.page.evaluate('() => document.body.innerText')
-
-            is_item_page = '/item/' in current_url or 'id=' in current_url
-
-            if is_item_page:
+            # 1) 跳转商品详情页 → 成功
+            if '/item/' in current_url or 'id=' in current_url:
+                page_text = await self._safe_body_text()
                 result["success"] = True
                 result["message"] = '商品发布成功（已跳转到商品详情页）'
                 result["item_url"] = current_url
-
                 item_id_match = re.search(r'id=(\d+)', current_url)
                 if item_id_match:
                     result["item_id"] = item_id_match.group(1)
-
                 logger.info("✅✅✅ 商品发布成功！")
-                logger.info("✅ 已跳转到商品详情页")
                 logger.info(f"✅ 商品链接: {current_url}")
-
-                has_manage_buttons = '下架' in page_text and '删除' in page_text
-                if has_manage_buttons:
+                if '下架' in page_text and '删除' in page_text:
                     logger.info("✅ 已找到下架和删除按钮，确认发布成功")
                     result["success_flag"] = 'detected_manage_buttons'
                 else:
                     logger.info("⚠️ 未找到下架和删除按钮，但URL已跳转到商品详情页")
                     result["success_flag"] = 'url_jumped'
+                return
 
-            elif '发布成功' in page_text or '已发布' in page_text:
+            page_text = await self._safe_body_text()
+
+            # 4) 认证弹窗 → 截图 + 通知 + 持续等待
+            if any(kw in page_text for kw in self._AUTH_DIALOG_KEYWORDS):
+                if not auth_seen:
+                    auth_seen = True
+                    logger.warning("⚠️ 检测到「完成认证才可继续发布」风控弹窗！")
+                    logger.warning("   请用登录该账号的闲鱼App扫码完成认证，系统将持续等待（最长10分钟）")
+                    await self._save_auth_screenshot(result)
+                    await self._notify_auth_wait(result)
+                since_auth_notify += 3
+                if since_auth_notify >= self._AUTH_NOTIFY_INTERVAL:
+                    since_auth_notify = 0
+                    # 弹窗内的二维码可能随会话刷新，重复截图更新链接并通知
+                    await self._save_auth_screenshot(result)
+                    await self._notify_auth_wait(result)
+                if elapsed >= self._AUTH_WAIT_MAX_SECONDS:
+                    logger.warning("⚠️ 认证等待超时（10分钟），按发布失败处理")
+                    break
+                continue
+
+            # 弹窗消失后的宽限观察期：认证刚完成，给页面跳转留时间（只进入一次）
+            if auth_seen and auth_grace_left == 0 and not auth_grace_started:
+                auth_grace_left = self._AUTH_GRACE_SECONDS
+                auth_grace_started = True
+                logger.info("✅ 认证弹窗已消失（用户可能已完成扫码），继续观察发布跳转...")
+                continue
+            if auth_grace_left > 0:
+                auth_grace_left -= 3
+                if auth_grace_left > 0:
+                    continue
+                # 宽限耗尽仍未跳转 → 落入超时兜底
+
+            # 2) 页面成功提示
+            if '发布成功' in page_text or '已发布' in page_text:
                 result["success"] = True
                 result["message"] = '商品发布成功（页面显示成功提示）'
                 logger.info("✅✅✅ 商品发布成功（页面显示成功提示）")
-
-            elif '成功' in page_text and ('发布' in page_text or '上架' in page_text):
+                return
+            if '成功' in page_text and ('发布' in page_text or '上架' in page_text):
                 result["success"] = True
                 result["message"] = '商品发布成功（检测到成功提示）'
                 logger.info("✅✅✅ 商品发布成功（检测到成功提示）")
+                return
 
-            elif '发布失败' in page_text or '失败' in page_text or '错误' in page_text:
+            # 3) 页面明确失败提示
+            if '发布失败' in page_text or '失败' in page_text or '错误' in page_text:
                 result["success"] = False
                 result["message"] = '商品发布失败，页面显示错误提示'
                 result["failure_reason"] = 'error_message_detected'
                 logger.error("❌ 商品发布失败，页面显示错误提示")
+                return
 
-            elif '发闲置' in current_url or 'publish' in current_url:
-                result["success"] = False
-                result["failure_reason"] = 'page_not_redirected'
-                logger.warning("⚠️ 可能发布失败")
-                logger.warning("⚠️ 页面未跳转，仍停留在发布页")
-                logger.warning(f"⚠️ 当前URL: {current_url}")
-                logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
-                # 诊断增强：未跳转时把页面完整文本打印出来、截图存盘，
-                # 便于判断到底是"请选择分类"字段校验、风控验证还是审核拦截，
-                # 避免靠猜测反复试错。
-                hints = await self._dump_publish_failure_context(page_text)
-                base_msg = '可能发布失败（页面未跳转，仍停留在发布页）'
-                if hints:
-                    result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}"
-                else:
-                    result["message"] = base_msg
+            if elapsed >= self._POST_CLICK_TIMEOUT:
+                break
 
-            else:
-                result["success"] = False
-                result["failure_reason"] = 'unknown'
-                logger.warning("⚠️ 无法确认发布状态")
-                logger.warning(f"⚠️ 当前URL: {current_url}")
-                logger.warning(f"⚠️ 页面文本: {page_text[:200]}")
-                logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
-                hints = await self._dump_publish_failure_context(page_text)
-                base_msg = '无法确认发布状态'
-                if hints:
-                    result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}"
-                else:
-                    result["message"] = base_msg
-
+        # 超时兜底：与旧版语义保持一致
+        current_url = self.page.url
+        page_text = await self._safe_body_text()
+        if '发闲置' in current_url or 'publish' in current_url:
+            result["success"] = False
+            result["failure_reason"] = 'page_not_redirected'
+            logger.warning("⚠️ 可能发布失败")
+            logger.warning("⚠️ 页面未跳转，仍停留在发布页")
+            logger.warning(f"⚠️ 当前URL: {current_url}")
+            logger.warning("⚠️ 可能原因：宝贝所在地未设置、内容触发审核、账号风控等")
+            hints = await self._dump_publish_failure_context(page_text)
+            base_msg = '可能发布失败（页面未跳转，仍停留在发布页）'
+            result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}" if hints else base_msg
         else:
-            result["message"] = '未找到发布按钮'
-            logger.error("❌ 未找到发布按钮")
+            result["success"] = False
+            result["failure_reason"] = 'unknown'
+            logger.warning("⚠️ 无法确认发布状态")
+            logger.warning(f"⚠️ 当前URL: {current_url}")
+            logger.warning(f"⚠️ 页面文本: {page_text[:200]}")
+            hints = await self._dump_publish_failure_context(page_text)
+            base_msg = '无法确认发布状态'
+            result["message"] = f"{base_msg}；命中关键词：{', '.join(hints)}" if hints else base_msg
 
     async def _dump_publish_failure_context(self, page_text: str) -> list[str]:
         """发布未跳转时，转储页面文本与整页截图，供事后定位真实拦截原因。
@@ -2027,6 +2119,7 @@ class XianyuPublisher:
             hints = [
                 "请选择分类", "请选择", "请填写", "必填", "不能为空",
                 "验证", "滑动", "拖动", "安全", "校验",
+                "完成认证", "认证", "扫脸", "实人",
                 "审核", "风控", "违规", "限制", "频繁", "异常",
                 "商品描述不能包含emoji", "请输入宝贝的品牌",
             ]

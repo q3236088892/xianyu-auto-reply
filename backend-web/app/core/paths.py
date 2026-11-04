@@ -43,6 +43,7 @@ UPLOADS_IMAGES = UPLOADS_ROOT / "images"      # 图片上传目录
 UPLOADS_KEYWORDS = UPLOADS_ROOT / "keywords"  # 关键词图片目录
 UPLOADS_FACE = UPLOADS_ROOT / "face"          # 人脸验证截图目录
 UPLOADS_PRODUCTS = UPLOADS_ROOT / "products"  # 商品发布图片目录
+UPLOADS_PUBLISH_AUTH = UPLOADS_ROOT / "publish_auth"  # 发布认证二维码截图目录
 
 
 def ensure_upload_dirs() -> None:
@@ -54,6 +55,7 @@ def ensure_upload_dirs() -> None:
         UPLOADS_KEYWORDS,
         UPLOADS_FACE,
         UPLOADS_PRODUCTS,
+        UPLOADS_PUBLISH_AUTH,
     ]
     for dir_path in dirs:
         dir_path.mkdir(parents=True, exist_ok=True)
@@ -75,6 +77,7 @@ def get_upload_path(subdir: str = "images") -> Path:
         "keywords": UPLOADS_KEYWORDS,
         "face": UPLOADS_FACE,
         "products": UPLOADS_PRODUCTS,
+        "publish_auth": UPLOADS_PUBLISH_AUTH,
     }
     return subdirs.get(subdir, UPLOADS_ROOT)
 
@@ -106,6 +109,7 @@ __all__ = [
     "UPLOADS_KEYWORDS",
     "UPLOADS_FACE",
     "UPLOADS_PRODUCTS",
+    "UPLOADS_PUBLISH_AUTH",
     "ensure_upload_dirs",
     "get_upload_path",
     "get_static_url",
