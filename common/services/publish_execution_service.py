@@ -172,17 +172,29 @@ async def execute_single_publish(
         except Exception as notify_exc:
             logger.error(f"更新认证等待状态失败: {notify_exc}")
 
+    proxy = _build_account_proxy(account, account_id)
+    relay = None
+    if proxy and proxy.get("username") and proxy.get("server", "").startswith("socks5://"):
+        # Chromium 不支持带认证的 SOCKS5：起本地免密中继转发到带认证上游
+        from common.services.socks5_relay import start_socks5_auth_relay
+        relay = await start_socks5_auth_relay(
+            proxy["server"], proxy["username"], proxy.get("password", ""),
+        )
+        proxy = relay.proxy_dict
     try:
         result = await publish_single_item(
             item_data=publish_item_data,
             cookie=cookies_str,
             static_root=static_root,
             on_auth_wait=_notify_auth_wait,
-            proxy=_build_account_proxy(account, account_id),
+            proxy=proxy,
         )
     except Exception as exc:
         pub_error = exc
         logger.error(f"单品发布异常: {exc}")
+    finally:
+        if relay is not None:
+            await relay.close()
 
     try:
         async with async_session_maker() as fresh_session:
