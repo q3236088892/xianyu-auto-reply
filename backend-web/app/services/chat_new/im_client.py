@@ -34,6 +34,7 @@ from common.services.token_renewal_cache_service import (
 from common.utils.time_utils import get_beijing_now_naive
 from common.utils.xianyu_utils import (
     browser_chrome_major,
+    browser_user_agent,
     generate_device_id,
     generate_mid,
     generate_sign,
